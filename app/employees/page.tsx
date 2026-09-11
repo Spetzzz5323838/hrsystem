@@ -1,0 +1,190 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import { Search } from "lucide-react";
+
+type EmployeeRow = {
+  employmentId: number;
+  personId: number;
+  fullName: string;
+  phone: string;
+  positionTitle: string;
+  objectId: number;
+  objectName: string;
+  status: string;
+  competencyDone: number;
+  competencyTotal: number;
+};
+
+type ListResponse = { employees: EmployeeRow[]; objects: { id: number; name: string }[]; total: number };
+
+const STATUS_LABELS: Record<string, { label: string; cls: string }> = {
+  REGISTERED: { label: "Зареєстрований", cls: "bg-slate-100 text-slate-700 border-slate-300" },
+  ACTIVATED: { label: "Активовано", cls: "bg-sky-50 text-sky-700 border-sky-200" },
+  DOCUMENTS_PENDING: { label: "Оформлення", cls: "bg-amber-50 text-amber-800 border-amber-300" },
+  TRAINEE: { label: "Стажер", cls: "bg-indigo-50 text-indigo-700 border-indigo-200" },
+  READY_FOR_ATTESTATION: { label: "На атестацію", cls: "bg-amber-100 text-amber-900 border-amber-400" },
+  ACTIVE: { label: "Працює", cls: "bg-emerald-50 text-emerald-700 border-emerald-200" },
+  TERMINATION_STARTED: { label: "Звільняється", cls: "bg-rose-50 text-rose-700 border-rose-200" },
+  TERMINATED: { label: "Звільнений", cls: "bg-slate-100 text-slate-500 border-slate-300" },
+};
+
+const AVATAR_BG = ["bg-slate-700", "bg-teal-700", "bg-indigo-700", "bg-amber-700", "bg-rose-700", "bg-emerald-700"];
+
+function Avatar({ name, size = 30 }: { name: string; size?: number }) {
+  const parts = name.split(" ");
+  const ini = (parts[0]?.[0] ?? "") + (parts[1]?.[0] ?? "");
+  const bg = AVATAR_BG[name.length % AVATAR_BG.length];
+  return (
+    <span
+      className={`flex shrink-0 items-center justify-center rounded-full font-medium text-white ${bg}`}
+      style={{ width: size, height: size, fontSize: size * 0.36 }}
+    >
+      {ini}
+    </span>
+  );
+}
+
+function Badge({ status }: { status: string }) {
+  const meta = STATUS_LABELS[status] ?? { label: status, cls: "bg-slate-100 text-slate-700 border-slate-300" };
+  return <span className={`inline-flex items-center border px-2 py-0.5 text-xs font-medium rounded ${meta.cls}`}>{meta.label}</span>;
+}
+
+export default function EmployeesPage() {
+  const [q, setQ] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+  const [objectFilter, setObjectFilter] = useState("");
+  const [data, setData] = useState<ListResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (q) params.set("q", q);
+    if (statusFilter) params.set("status", statusFilter);
+    if (objectFilter) params.set("objectId", objectFilter);
+
+    fetch(`/api/employees?${params}`)
+      .then((r) => {
+        if (!r.ok) throw new Error(r.status === 401 ? "Потрібно увійти в систему" : "Не вдалося завантажити список");
+        return r.json();
+      })
+      .then(setData)
+      .catch((e) => setError(e.message));
+  }, [q, statusFilter, objectFilter]);
+
+  if (error) {
+    return <div className="px-6 py-6 text-sm text-rose-700">{error}</div>;
+  }
+
+  if (!data) {
+    return <div className="px-6 py-6 text-sm text-slate-500">Завантаження…</div>;
+  }
+
+  return (
+    <div className="min-h-screen bg-slate-100 px-6 py-6">
+      <div className="space-y-4">
+        <div className="flex items-baseline justify-between">
+          <h2 className="text-xl font-semibold text-slate-900">Працівники</h2>
+          <span className="text-sm text-slate-500">
+            {data.employees.length} з {data.total}
+          </span>
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          <div className="relative">
+            <Search size={15} className="absolute left-2.5 top-2.5 text-slate-400" />
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Прізвище або телефон"
+              className="w-64 rounded border border-slate-300 bg-white py-1.5 pl-8 pr-3 text-sm placeholder-slate-400 focus:border-slate-800 focus:outline-none"
+            />
+          </div>
+          <select
+            value={objectFilter}
+            onChange={(e) => setObjectFilter(e.target.value)}
+            className="rounded border border-slate-300 bg-white px-2 py-1.5 text-sm"
+          >
+            <option value="">Усі об&rsquo;єкти</option>
+            {data.objects.map((o) => (
+              <option key={o.id} value={o.id}>
+                {o.name}
+              </option>
+            ))}
+          </select>
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="rounded border border-slate-300 bg-white px-2 py-1.5 text-sm"
+          >
+            <option value="">Усі статуси</option>
+            {Object.entries(STATUS_LABELS).map(([k, v]) => (
+              <option key={k} value={k}>
+                {v.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="overflow-hidden border border-slate-200 bg-white rounded-md">
+          <table className="w-full text-sm">
+            <thead className="border-b border-slate-200 bg-slate-50 text-left text-xs text-slate-500">
+              <tr>
+                <th className="px-4 py-2 font-medium">Працівник</th>
+                <th className="px-4 py-2 font-medium">Посада</th>
+                <th className="px-4 py-2 font-medium">Місце роботи</th>
+                <th className="px-4 py-2 font-medium">Статус</th>
+                <th className="px-4 py-2 font-medium">Компетенції</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {data.employees.map((e) => (
+                <tr key={e.employmentId} className="hover:bg-slate-50">
+                  <td className="px-4 py-2">
+                    <Link href={`/employees/${e.employmentId}`} className="flex items-center gap-2.5">
+                      <Avatar name={e.fullName} />
+                      <div>
+                        <p className="font-medium text-slate-900">{e.fullName}</p>
+                        <p className="text-xs tabular-nums text-slate-400">{e.phone}</p>
+                      </div>
+                    </Link>
+                  </td>
+                  <td className="px-4 py-2 text-slate-600">{e.positionTitle}</td>
+                  <td className="px-4 py-2 text-slate-600">{e.objectName}</td>
+                  <td className="px-4 py-2">
+                    <Badge status={e.status} />
+                  </td>
+                  <td className="px-4 py-2">
+                    {e.competencyTotal > 0 ? (
+                      <div className="flex items-center gap-2">
+                        <div className="h-1.5 w-20 rounded bg-slate-200">
+                          <div
+                            className={`h-1.5 rounded ${e.competencyDone === e.competencyTotal ? "bg-emerald-500" : "bg-amber-500"}`}
+                            style={{ width: `${(e.competencyDone / e.competencyTotal) * 100}%` }}
+                          />
+                        </div>
+                        <span className="tabular-nums text-xs text-slate-500">
+                          {e.competencyDone}/{e.competencyTotal}
+                        </span>
+                      </div>
+                    ) : (
+                      <span className="text-xs text-slate-400">немає в довіднику</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+              {!data.employees.length && (
+                <tr>
+                  <td colSpan={5} className="px-4 py-8 text-center text-sm text-slate-500">
+                    Нікого не знайдено.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}

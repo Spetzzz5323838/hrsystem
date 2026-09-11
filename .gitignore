@@ -32,6 +32,13 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
+
+# prisma
+/generated/
+
+# скани документів — персональні дані, ніколи не в git
+/storage/
 
 # vercel
 .vercel

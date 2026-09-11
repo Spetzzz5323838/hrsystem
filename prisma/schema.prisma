@@ -1,0 +1,652 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum OrgNodeType {
+  COMPANY
+  DIVISION
+  OBJECT
+  DEPARTMENT
+}
+
+enum Role {
+  EMPLOYEE
+  CURATOR
+  STORE_ADMIN
+  ONEC_ADMIN
+  ACCOUNTANT
+  AUDITOR
+  COO
+  SYSADMIN
+}
+
+enum ScopeType {
+  SELF
+  SUBORDINATES
+  OWN_DEPARTMENT
+  OWN_OBJECT
+  OWN_SUBTREE
+  CUSTOM_NODE
+  COMPANY
+}
+
+enum Capability {
+  VIEW_EMPLOYEE
+  EDIT_PROFILE
+  ACTIVATE_EMPLOYEE
+  ASSIGN_CURATOR
+  VIEW_DOCUMENTS
+  UPLOAD_DOCUMENTS
+  SET_1C_PASSWORD
+  CLOSE_INTERNSHIP
+  RUN_ATTESTATION
+  RATE_POSITIVE_NEGATIVE
+  ISSUE_REPRIMAND_AWARD
+  ASSIGN_EQUIPMENT
+  CLEAR_EQUIPMENT
+  INIT_TERMINATION
+  APPROVE_TERMINATION
+  CLOSE_TERMINATION
+  PRINT_CLEARANCE
+  MANAGE_MATERIALS
+  MANAGE_TEMPLATES
+  MANAGE_ORG_STRUCTURE
+  VIEW_ANALYTICS
+  VIEW_AUDIT_LOG
+  MANAGE_REMINDERS
+  /// Немає в docs catalogs-v1.1.md §4.2 (той документ — до появи переведення й
+  /// заморозки). Назви взято з prototype/hr-prototype-v3.jsx (ACTORS.caps),
+  /// де прототип уже зіткнувся з тим самим пробілом і сам їх назвав.
+  FREEZE
+  INIT_TRANSFER
+  APPROVE_TRANSFER
+}
+
+enum EmploymentStatus {
+  REGISTERED
+  ACTIVATED
+  DOCUMENTS_PENDING
+  TRAINEE
+  READY_FOR_ATTESTATION
+  ACTIVE
+  TRANSFER_PENDING
+  FROZEN
+  TERMINATION_STARTED
+  TERMINATED
+}
+
+enum CompetencySource {
+  ATTESTATION
+  TEST
+  EXTERNAL_COURSE
+  MANUAL
+}
+
+enum MaterialType {
+  PDF
+  VIDEO
+  LINK
+}
+
+enum ProcessType {
+  ONBOARDING
+  OFFBOARDING
+  EXTRA_TRAINING
+  TRANSFER
+}
+
+enum ActionType {
+  MARK
+  UPLOAD
+  INPUT_VALUE
+  TEST
+  APPROVAL
+  AUTO
+  /// Немає в plan-v1.md §6 (5 значень) — з'являється тільки в
+  /// catalogs-v1.1.md §8.1 для пункту «Друк листа узгодження».
+  PRINT
+}
+
+enum ProcessState {
+  RUNNING
+  DONE
+  CANCELLED
+}
+
+/// PENDING/DONE — фактичні стани, що зберігаються. BLOCKED і OVERDUE —
+/// похідні: рахуються при читанні (наступний блокуючий пункт заблокований,
+/// поки не закрито попередній; протерміновано, якщо dueAt минув).
+enum TaskStatus {
+  PENDING
+  DONE
+}
+
+/// Модуль-надбудова онбордингу (docs/hr-system-catalogs-v1.1.md §6.2).
+/// null у ChecklistItemTemplate.module = базовий пункт для всіх.
+enum ChecklistModule {
+  CASHIER
+  MVO
+  FOOD
+  RETAIL
+  WAREHOUSE
+  TRANSPORT
+  SECURITY
+  MANAGEMENT
+  OFFICE
+}
+
+enum RatingType {
+  POSITIVE
+  NEGATIVE
+  REPRIMAND
+  AWARD
+  AUTO
+}
+
+enum RatingSide {
+  POS
+  NEG
+}
+
+/// Три шари видимості (docs hr-rating-visibility-v1.3.md §1):
+/// PRIVATE — тільки автор і керівники, які бачать цього працівника;
+/// EMPLOYEE — і сам працівник; PUBLIC — і колеги.
+enum Visibility {
+  PRIVATE
+  EMPLOYEE
+  PUBLIC
+}
+
+/// Дерево організації: компанія -> напрям/кластер -> об'єкт -> відділ.
+/// path — матеріалізований шлях виду "1.3.14", перевірка доступу зводиться
+/// до target.path.startsWith(scope.path).
+model OrgNode {
+  id       Int         @id @default(autoincrement())
+  type     OrgNodeType
+  name     String
+  code     String?     @unique
+  parentId Int?
+  parent   OrgNode?    @relation("OrgNodeTree", fields: [parentId], references: [id])
+  children OrgNode[]   @relation("OrgNodeTree")
+  path     String
+
+  headEmploymentId Int?
+  headEmployment   Employment? @relation(fields: [headEmploymentId], references: [id])
+
+  address     String?
+  isActive    Boolean @default(true)
+  sortOrder   Int     @default(0)
+  externalRef String?
+
+  staffUnits       StaffUnit[]
+  permissionGrants PermissionGrant[]
+  roleAssignments  RoleAssignment[]
+  equipment        Equipment[]
+
+  @@index([path])
+}
+
+/// Фізична особа — окремо від факту роботи (Employment), щоб одна людина
+/// могла мати кілька періодів роботи чи суміщень без переробки моделі.
+/// Телефон — природний ключ для входу й пошуку, але не первинний ключ:
+/// номери змінюються й повторно продаються операторами (docs v1.2 §5).
+model Person {
+  id              Int       @id @default(autoincrement())
+  fullName        String
+  birthDate       DateTime?
+  telegramId      BigInt?   @unique
+  phone           String    @unique
+  phoneVerifiedAt DateTime?
+  passwordHash    String?
+  externalRef     String?
+  createdAt       DateTime  @default(now())
+
+  employments       Employment[]
+  competencyRecords CompetencyRecord[]
+  phoneHistory      PhoneHistory[]
+  sessions          Session[]
+  ratingEvents      RatingEvent[]
+  badgeAwards       BadgeAward[]
+  documents         Document[]
+}
+
+/// Веб-сесія після входу. У базі — тільки хеш токена (SHA-256), сам
+/// токен живе лише в httpOnly cookie й ніколи не потрапляє в БД у
+/// відкритому вигляді. TTL 12 год (docs hr-system-plan-v1.md §4.4).
+model Session {
+  id        Int      @id @default(autoincrement())
+  personId  Int
+  person    Person   @relation(fields: [personId], references: [id])
+  tokenHash String   @unique
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+
+  @@index([personId])
+}
+
+/// Історія зміни номера телефону — щоб пошук і зв'язки не ламались,
+/// коли людина міняє номер або оператор перепродає старий.
+model PhoneHistory {
+  id       Int       @id @default(autoincrement())
+  personId Int
+  person   Person    @relation(fields: [personId], references: [id])
+  phone    String
+  from     DateTime
+  to       DateTime?
+
+  @@index([personId])
+}
+
+/// Факт роботи: людина на штатній одиниці. Статус — наслідок процесу
+/// (онбординг/звільнення), вручну не змінюється.
+model Employment {
+  id          Int              @id @default(autoincrement())
+  personId    Int
+  person      Person           @relation(fields: [personId], references: [id])
+  staffUnitId Int
+  staffUnit   StaffUnit        @relation(fields: [staffUnitId], references: [id])
+  status      EmploymentStatus @default(REGISTERED)
+  hiredAt     DateTime?
+  terminatedAt DateTime?
+  rate        Decimal?         @db.Decimal(3, 2)
+
+  /// Заморозка (docs v1.2 §3) — заповнюються лише коли status = FROZEN.
+  frozenReasonCode      String?
+  frozenReason          FreezeReason? @relation(fields: [frozenReasonCode], references: [code])
+  frozenSince           DateTime?
+  plannedReturnAt       DateTime?
+  /// true = позиція звільняється на час заморозки (можна брати заміну).
+  freezeVacatesPosition Boolean?
+
+  /// Звільнення (docs plan-v1.md §12, catalogs-v1.1.md §8) — заповнюються
+  /// при ініціації, тільки коли status = TERMINATION_STARTED/TERMINATED.
+  terminationReasonCode String?
+  terminationReason      TerminationReason? @relation(fields: [terminationReasonCode], references: [code])
+  lastWorkingDay         DateTime?
+
+  managerId    Int?
+  manager      Employment?  @relation("EmploymentManager", fields: [managerId], references: [id])
+  subordinates Employment[] @relation("EmploymentManager")
+
+  /// Куратор — призначається пунктом чек-ліста онбордингу "Призначення
+  /// куратора" (docs hr-system-plan-v1.md §8, п.2). Раніше було null-заглушкою
+  /// в резолвінгу задач CURATOR-ролі — тепер реальне поле.
+  curatorId Int?
+  curator   Employment?  @relation("EmploymentCurator", fields: [curatorId], references: [id])
+  curatees  Employment[] @relation("EmploymentCurator")
+
+  headOfNodes     OrgNode[]
+  roleAssignments RoleAssignment[]
+
+  processInstances     ProcessInstance[]
+  assignedTasks        Task[]        @relation("TaskAssignee")
+  completedTasks       Task[]        @relation("TaskCompletedBy")
+  authoredRatingEvents RatingEvent[] @relation("RatingEventAuthor")
+  awardedBadges        BadgeAward[]  @relation("BadgeAwardedBy")
+  clearanceSheets      ClearanceSheet[]
+  uploadedDocuments    Document[]
+  responsibleEquipment Equipment[]
+
+  @@index([personId])
+  @@index([staffUnitId])
+}
+
+/// Глобальний каталог посад — редагується без розробника.
+model PositionProfile {
+  id                     Int     @id @default(autoincrement())
+  title                  String  @unique
+  level                  Int
+  canBeCurator           Boolean @default(false)
+  requiresCashierAccount Boolean @default(false)
+  isFoodHandling         Boolean @default(false)
+  isMateriallyLiable     Boolean @default(false)
+  systemRole             Role?
+  isActive               Boolean @default(true)
+  externalRef            String?
+  /// Автопідбір модулів онбордингу за прапорцями посади (docs v1.1 §10).
+  moduleFlags            ChecklistModule[] @default([])
+
+  staffUnits           StaffUnit[]
+  permissionGrants     PermissionGrant[]
+  positionCompetencies PositionCompetency[]
+}
+
+/// Штатна одиниця — посада, розставлена в конкретний вузол дерева.
+model StaffUnit {
+  id                 Int             @id @default(autoincrement())
+  positionProfileId  Int
+  positionProfile    PositionProfile @relation(fields: [positionProfileId], references: [id])
+  orgNodeId          Int
+  orgNode            OrgNode         @relation(fields: [orgNodeId], references: [id])
+  plannedHeadcount   Int             @default(1)
+
+  employments Employment[]
+
+  @@unique([positionProfileId, orgNodeId])
+}
+
+/// Права = можливість (capability) x область дії (scope). Грант видається
+/// або через профіль посади, або через функціональну роль.
+model PermissionGrant {
+  id                Int              @id @default(autoincrement())
+  positionProfileId Int?
+  positionProfile   PositionProfile? @relation(fields: [positionProfileId], references: [id])
+  role              Role?
+  capability        Capability
+  scope             ScopeType
+  customNodeId      Int?
+  customNode        OrgNode?         @relation(fields: [customNodeId], references: [id])
+
+  @@index([positionProfileId])
+  @@index([role])
+}
+
+/// Функціональна роль (бухгалтер, 1С, ревізор, COO...), що не входить
+/// у рівневу ієрархію посад. orgNodeId визначає область: доступ
+/// поширюється на все піддерево.
+model RoleAssignment {
+  id           Int        @id @default(autoincrement())
+  employmentId Int
+  employment   Employment @relation(fields: [employmentId], references: [id])
+  role         Role
+  orgNodeId    Int
+  orgNode      OrgNode    @relation(fields: [orgNodeId], references: [id])
+  createdAt    DateTime   @default(now())
+  createdById  Int?
+
+  @@unique([employmentId, role, orgNodeId])
+}
+
+/// Довідник компетенцій. Навчання рахується по компетенціях, не по треках:
+/// дельта = компетенції_посади − чинні_компетенції_людини (docs v1.2 §1).
+model Competency {
+  id                 Int     @id @default(autoincrement())
+  code               String  @unique
+  name               String
+  validMonths        Int?
+  resetOnBreakMonths Int?
+  isBonus            Boolean @default(false)
+
+  positionCompetencies PositionCompetency[]
+  records              CompetencyRecord[]
+  materials            Material[]
+}
+
+/// Що вимагає профіль посади.
+model PositionCompetency {
+  positionProfileId Int
+  positionProfile   PositionProfile @relation(fields: [positionProfileId], references: [id])
+  competencyId      Int
+  competency        Competency      @relation(fields: [competencyId], references: [id])
+
+  @@id([positionProfileId, competencyId])
+}
+
+/// Що людина фактично має. Під час заморозки годинник строку дії
+/// зупиняється: frozenDays накопичується й додається до validUntil
+/// при розморозці (docs v1.2 §3).
+model CompetencyRecord {
+  id           Int              @id @default(autoincrement())
+  personId     Int
+  person       Person           @relation(fields: [personId], references: [id])
+  competencyId Int
+  competency   Competency       @relation(fields: [competencyId], references: [id])
+  passedAt     DateTime
+  score        Int?
+  validUntil   DateTime?
+  source       CompetencySource
+  frozenDays   Int              @default(0)
+
+  @@index([personId])
+  @@index([competencyId])
+}
+
+/// Навчальний матеріал. Належить компетенції (docs v1.2 §7: "компетенція
+/// має матеріали й тест") — навчальний профіль посади збирається
+/// автоматично через PositionCompetency, окремої прив'язки матеріал↔посада
+/// не потрібно. Відео — тільки через intranet, PDF можна й через бот
+/// (docs hr-system-plan-v1.md §9.1).
+model Material {
+  id           Int          @id @default(autoincrement())
+  competencyId Int
+  competency   Competency   @relation(fields: [competencyId], references: [id])
+  title        String
+  type         MaterialType
+  url          String?
+  filePath     String?
+  durationMin  Int?
+  sendViaBot   Boolean      @default(false)
+
+  @@index([competencyId])
+}
+
+/// Онбординг/звільнення не програмуються — це конфігуровані шаблони.
+/// Версіонується: редагування створює нову версію, активні процеси
+/// доживають на старій (docs hr-system-catalogs-v1.1.md §9).
+model ProcessTemplate {
+  id       Int         @id @default(autoincrement())
+  code     String
+  version  Int
+  type     ProcessType
+  name     String
+  isActive Boolean     @default(true)
+
+  items     ChecklistItemTemplate[]
+  instances ProcessInstance[]
+
+  @@unique([code, version])
+}
+
+/// Пункт чек-ліста шаблону. module = null означає базовий пункт
+/// (виконується для всіх); інакше — надбудова, що підключається лише
+/// якщо вона є в PositionProfile.moduleFlags (docs v1.1 §6.1-6.2).
+model ChecklistItemTemplate {
+  id              Int             @id @default(autoincrement())
+  templateId      Int
+  template        ProcessTemplate @relation(fields: [templateId], references: [id])
+  order           Int
+  title           String
+  /// null = виконує сама система (AUTO-пункт), без резолвінгу виконавця.
+  responsibleRole Role?
+  actionType      ActionType
+  isBlocking      Boolean         @default(true)
+  slaHours        Int?
+  module          ChecklistModule?
+
+  tasks Task[]
+
+  @@index([templateId])
+}
+
+/// Конкретний запуск шаблону для конкретного працевлаштування.
+model ProcessInstance {
+  id           Int             @id @default(autoincrement())
+  employmentId Int
+  employment   Employment      @relation(fields: [employmentId], references: [id])
+  templateId   Int
+  template     ProcessTemplate @relation(fields: [templateId], references: [id])
+  state        ProcessState    @default(RUNNING)
+  startedAt    DateTime        @default(now())
+  finishedAt   DateTime?
+
+  tasks Task[]
+
+  @@index([employmentId])
+}
+
+/// Конкретна задача з чек-ліста. status зберігає лише PENDING/DONE —
+/// "заблоковано" й "протерміновано" рахуються на льоту (див. TaskStatus).
+model Task {
+  id             Int                   @id @default(autoincrement())
+  instanceId     Int
+  instance       ProcessInstance       @relation(fields: [instanceId], references: [id])
+  itemTemplateId Int
+  itemTemplate   ChecklistItemTemplate @relation(fields: [itemTemplateId], references: [id])
+  assigneeId     Int?
+  assignee       Employment?           @relation("TaskAssignee", fields: [assigneeId], references: [id])
+  status         TaskStatus            @default(PENDING)
+  payload        Json?
+  comment        String?
+  dueAt          DateTime?
+  completedAt    DateTime?
+  completedById  Int?
+  completedBy    Employment?           @relation("TaskCompletedBy", fields: [completedById], references: [id])
+
+  @@index([instanceId])
+  @@index([assigneeId])
+}
+
+/// Довідник приводів позитив/негатив (docs v1.3 §2.1). Редагується.
+model RatingCategory {
+  code          String     @id
+  name          String
+  side          RatingSide
+  defaultPoints Int
+  isActive      Boolean    @default(true)
+
+  events RatingEvent[]
+}
+
+/// Подія рейтингу. ratingScore людини = сума points за останні 12 міс,
+/// без скасованих — рахується на льоту (lib/rating.ts), не зберігається.
+model RatingEvent {
+  id           Int         @id @default(autoincrement())
+  personId     Int
+  person       Person      @relation(fields: [personId], references: [id])
+  type         RatingType
+  categoryCode String?
+  category     RatingCategory? @relation(fields: [categoryCode], references: [code])
+  points       Int
+  /// Обов'язковий для NEGATIVE і AWARD (docs v1.3 §2.1, §2.2).
+  comment      String?
+  visibility   Visibility
+  authorId     Int
+  author       Employment  @relation("RatingEventAuthor", fields: [authorId], references: [id])
+  occurredAt   DateTime    @default(now())
+  cancelledAt  DateTime?
+  cancelReason String?
+
+  @@index([personId])
+  @@index([authorId])
+}
+
+/// Каталог бейджів — автоматичні (isAuto) і ручні номінації (docs v1.3 §3).
+model Badge {
+  code        String  @id
+  name        String
+  description String
+  isAuto      Boolean
+  ruleJson    Json?
+
+  awards BadgeAward[]
+}
+
+/// Факт нагородження. awardedById = null для автоматичних бейджів.
+model BadgeAward {
+  id          Int        @id @default(autoincrement())
+  personId    Int
+  person      Person     @relation(fields: [personId], references: [id])
+  badgeCode   String
+  badge       Badge      @relation(fields: [badgeCode], references: [code])
+  awardedAt   DateTime   @default(now())
+  awardedById Int?
+  awardedBy   Employment? @relation("BadgeAwardedBy", fields: [awardedById], references: [id])
+  comment     String?
+
+  @@index([personId])
+}
+
+/// Довідник причин заморозки (docs v1.2 §3) — редагується.
+model FreezeReason {
+  code     String  @id
+  name     String
+  isActive Boolean @default(true)
+
+  employments Employment[]
+}
+
+/// Довідник причин звільнення (docs v1.1 §10: "зараз текст, потім
+/// мапиться на статті КЗпП") — редагується.
+model TerminationReason {
+  code     String  @id
+  name     String
+  isActive Boolean @default(true)
+
+  employments Employment[]
+}
+
+/// Лист узгодження звільнення (docs plan-v1.md §12.2). pdfPath поки
+/// завжди null — Puppeteer не піднятий, генеруємо лише дані й хеш стану,
+/// не файл.
+model ClearanceSheet {
+  id            Int      @id @default(autoincrement())
+  number        String   @unique
+  employmentId  Int
+  employment    Employment @relation(fields: [employmentId], references: [id])
+  instanceId    Int
+  generatedById Int
+  generatedAt   DateTime @default(now())
+  isComplete    Boolean
+  pdfPath       String?
+  hash          String
+
+  @@index([employmentId])
+}
+
+/// Довідник типів документів (docs catalogs-v1.1.md §5.1) — редагується.
+/// hasExpiry/reminderDaysBefore — для майбутніх нагадувань (канал:
+/// Telegram-бот, коли буде); retentionMonths — строк зберігання скану
+/// після звільнення (docs plan-v1.md §14).
+model DocumentType {
+  code               String  @id
+  name               String
+  hasExpiry          Boolean @default(false)
+  reminderDaysBefore Int?
+  retentionMonths    Int?
+  isActive           Boolean @default(true)
+
+  documents Document[]
+}
+
+/// Скан документа. Файл — тільки на локальному диску поза `public/`
+/// (docs: "скани документів завантажуються тільки через веб, ніколи
+/// через бот"), у базі — лише шлях. Дата спливання — не формула, а те,
+/// що надруковано на самому документі, тому вводиться вручну при
+/// завантаженні (на відміну від CompetencyRecord.validUntil).
+model Document {
+  id               Int          @id @default(autoincrement())
+  personId         Int
+  person           Person       @relation(fields: [personId], references: [id])
+  documentTypeCode String
+  documentType     DocumentType @relation(fields: [documentTypeCode], references: [code])
+  filePath         String
+  originalName     String
+  mimeType         String
+  uploadedById     Int
+  uploadedBy       Employment   @relation(fields: [uploadedById], references: [id])
+  uploadedAt       DateTime     @default(now())
+  expiresAt        DateTime?
+
+  @@index([personId])
+}
+
+/// Обладнання, закріплене за працівником (docs plan-v1.md §11).
+model Equipment {
+  id            Int         @id @default(autoincrement())
+  inventoryNo   String      @unique
+  name          String
+  orgNodeId     Int
+  orgNode       OrgNode     @relation(fields: [orgNodeId], references: [id])
+  responsibleId Int?
+  responsible   Employment? @relation(fields: [responsibleId], references: [id])
+  assignedAt    DateTime?
+  isActive      Boolean     @default(true)
+
+  @@index([orgNodeId])
+  @@index([responsibleId])
+}
