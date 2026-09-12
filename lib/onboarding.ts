@@ -297,6 +297,26 @@ export async function completeTask(
     data: { status: TaskStatus.DONE, completedAt: now, completedById: completedByEmploymentId },
   });
 
+  // dueAt рахувався при СТВОРЕННІ задачі — для заблокованого пункту в
+  // черзі це означає, що норматив міг минути ще до того, як виконавець
+  // фізично міг за нього взятися. Закриття поточного блокуючого пункту
+  // (саме такий і був перед нами — блокований пункт сюди не пройшов би
+  // перевірку вище) розблоковує рівно наступний блокуючий пункт: рахуємо
+  // йому dueAt заново від моменту розблокування, а не від старту процесу.
+  if (task.itemTemplate.isBlocking) {
+    const nextBlocking = await prisma.task.findFirst({
+      where: { instanceId: task.instanceId, status: TaskStatus.PENDING, itemTemplate: { isBlocking: true } },
+      include: { itemTemplate: true },
+      orderBy: { itemTemplate: { order: "asc" } },
+    });
+    if (nextBlocking?.itemTemplate.slaHours != null) {
+      await prisma.task.update({
+        where: { id: nextBlocking.id },
+        data: { dueAt: new Date(now.getTime() + nextBlocking.itemTemplate.slaHours * 60 * 60 * 1000) },
+      });
+    }
+  }
+
   // Стан-машина онбордингу (docs plan-v1.md §7). Прив'язка до назв
   // пунктів ONBOARDING_BASE — order у Prisma унікальний лише в межах
   // одного шаблону (у TRANSFER_BASE є свій пункт з тим самим номером,
