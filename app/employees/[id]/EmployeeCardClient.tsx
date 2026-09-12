@@ -13,6 +13,15 @@ type CompetencyRow = {
   validUntil: string | null;
 };
 
+type BonusCompetencyRow = {
+  competencyId: number;
+  name: string;
+  passedAt: string;
+  validUntil: string | null;
+  score: number | null;
+  expired: boolean;
+};
+
 type Detail = {
   employmentId: number;
   fullName: string;
@@ -25,6 +34,7 @@ type Detail = {
   terminatedAt: string | null;
   curatorName: string | null;
   competencies: CompetencyRow[];
+  bonusCompetencies: BonusCompetencyRow[];
 };
 
 const STATUS_LABELS: Record<string, { label: string; cls: string }> = {
@@ -1284,6 +1294,40 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
       .catch((e) => setRatingError(e.message));
   };
 
+  // ── Компетенції понад профіль (docs v1.2 §1, бейдж beyond_profile) ──
+  const [bonusOptions, setBonusOptions] = useState<{ id: number; name: string }[]>([]);
+  const [bonusCompetencyId, setBonusCompetencyId] = useState("");
+  const [bonusScore, setBonusScore] = useState("");
+  const [bonusSubmitting, setBonusSubmitting] = useState(false);
+  const [bonusError, setBonusError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch("/api/competencies")
+      .then((r) => (r.ok ? r.json() : []))
+      .then((all: { id: number; name: string; isBonus: boolean }[]) => setBonusOptions(all.filter((c) => c.isBonus)))
+      .catch(() => {});
+  }, []);
+
+  const submitBonusCompetency = () => {
+    if (!bonusCompetencyId) return;
+    setBonusSubmitting(true);
+    fetch(`/api/employees/${employmentId}/manual-competency`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ competencyId: Number(bonusCompetencyId), score: bonusScore ? Number(bonusScore) : null }),
+    })
+      .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
+      .then(({ ok, body }) => {
+        if (!ok) throw new Error(body.error ?? "Не вдалося записати компетенцію");
+        setBonusCompetencyId("");
+        setBonusScore("");
+        setBonusError(null);
+        loadDetail();
+      })
+      .catch((e) => setBonusError(e.message))
+      .finally(() => setBonusSubmitting(false));
+  };
+
   if (error) {
     return <div className="px-6 py-6 text-sm text-rose-700">{error}</div>;
   }
@@ -1653,6 +1697,75 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
                 )}
               </tbody>
             </table>
+          </Section>
+        )}
+
+        {tab === "comp" && (
+          <Section title="Понад профіль" right={<span className="text-sm text-slate-500">бонусні компетенції (бейдж «Понад профіль»)</span>}>
+            <table className="w-full text-sm">
+              <thead className="border-b border-slate-200 bg-slate-50 text-left text-xs text-slate-500">
+                <tr>
+                  <th className="px-4 py-2 font-medium">Компетенція</th>
+                  <th className="px-4 py-2 font-medium">Складено</th>
+                  <th className="px-4 py-2 font-medium">Дійсна до</th>
+                  <th className="px-4 py-2 font-medium text-right">Бал</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {detail.bonusCompetencies.map((c, i) => (
+                  <tr key={`${c.competencyId}-${i}`}>
+                    <td className="px-4 py-2 text-slate-800">{c.name}</td>
+                    <td className="px-4 py-2 tabular-nums text-slate-500">{fmtDate(c.passedAt)}</td>
+                    <td className="px-4 py-2 tabular-nums text-slate-500">
+                      {c.validUntil ? (
+                        <span className={c.expired ? "text-amber-700" : ""}>{fmtDate(c.validUntil)}</span>
+                      ) : (
+                        "безстроково"
+                      )}
+                    </td>
+                    <td className="px-4 py-2 text-right tabular-nums text-slate-500">{c.score ?? "—"}</td>
+                  </tr>
+                ))}
+                {!detail.bonusCompetencies.length && (
+                  <tr>
+                    <td colSpan={4} className="px-4 py-6 text-center text-sm text-slate-500">
+                      Ще немає жодної компетенції понад профіль.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+            <div className="flex flex-wrap items-center gap-2 border-t border-slate-200 px-4 py-3">
+              <select
+                value={bonusCompetencyId}
+                onChange={(e) => setBonusCompetencyId(e.target.value)}
+                className="rounded border border-slate-300 px-2 py-1.5 text-sm"
+              >
+                <option value="">— бонусна компетенція —</option>
+                {bonusOptions.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+              <input
+                type="number"
+                min={0}
+                max={100}
+                value={bonusScore}
+                onChange={(e) => setBonusScore(e.target.value)}
+                placeholder="бал (необов'язково)"
+                className="w-40 rounded border border-slate-300 px-2 py-1.5 text-sm"
+              />
+              <button
+                onClick={submitBonusCompetency}
+                disabled={!bonusCompetencyId || bonusSubmitting}
+                className="rounded bg-slate-900 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+              >
+                Записати
+              </button>
+              {bonusError && <span className="text-sm text-rose-700">{bonusError}</span>}
+            </div>
           </Section>
         )}
 

@@ -40,6 +40,24 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
 
   const competencies = await getCompetencyDelta(employment.personId, employment.staffUnit.positionProfileId);
 
+  // Понад профіль (docs v1.2 §1): бонусні компетенції не входять у
+  // PositionCompetency жодної посади, тому getCompetencyDelta їх не
+  // бачить — показуємо окремим списком фактично здобутих.
+  const bonusRecords = await prisma.competencyRecord.findMany({
+    where: { personId: employment.personId, competency: { isBonus: true } },
+    include: { competency: true },
+    orderBy: { passedAt: "desc" },
+  });
+  const now = new Date();
+  const bonusCompetencies = bonusRecords.map((r) => ({
+    competencyId: r.competencyId,
+    name: r.competency.name,
+    passedAt: r.passedAt,
+    validUntil: r.validUntil,
+    score: r.score,
+    expired: r.validUntil != null && r.validUntil < now,
+  }));
+
   return NextResponse.json({
     employmentId: employment.id,
     fullName: employment.person.fullName,
@@ -52,5 +70,6 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
     terminatedAt: employment.terminatedAt,
     curatorName: employment.curator?.person.fullName ?? null,
     competencies,
+    bonusCompetencies,
   });
 }
