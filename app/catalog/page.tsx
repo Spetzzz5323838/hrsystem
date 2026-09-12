@@ -37,7 +37,10 @@ type MaterialRow = {
   id: number;
   title: string;
   type: "PDF" | "VIDEO" | "LINK";
+  competencyId: number;
   competencyName: string;
+  url: string | null;
+  durationMin: number | null;
   sendViaBot: boolean;
 };
 
@@ -56,6 +59,7 @@ function Section({ title, right, children }: { title: string; right?: React.Reac
 export default function CatalogPage() {
   const [tab, setTab] = useState<"pos" | "comp" | "mat">("pos");
   const [error, setError] = useState<string | null>(null);
+  const [canEdit, setCanEdit] = useState(false);
 
   const [profiles, setProfiles] = useState<ProfileListItem[] | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -64,7 +68,7 @@ export default function CatalogPage() {
   const [competencies, setCompetencies] = useState<CompetencyRow[] | null>(null);
   const [materials, setMaterials] = useState<MaterialRow[] | null>(null);
 
-  useEffect(() => {
+  const loadCatalog = () => {
     Promise.all([
       fetch("/api/position-profiles").then((r) => {
         if (!r.ok) throw new Error(r.status === 401 ? "Потрібно увійти в систему" : "Не вдалося завантажити профілі посад");
@@ -83,14 +87,25 @@ export default function CatalogPage() {
         setProfiles(p);
         setCompetencies(c);
         setMaterials(m);
-        setSelectedId(p[0]?.id ?? null);
+        setSelectedId((prev) => prev ?? p[0]?.id ?? null);
       })
       .catch((e) => setError(e.message));
-  }, []);
+  };
 
   useEffect(() => {
+    loadCatalog();
+    fetch("/api/me")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((me) => {
+        if (!me) return;
+        setCanEdit(me.grants.some((g: { capability: string; scope: string }) => g.capability === "MANAGE_MATERIALS" && g.scope === "COMPANY"));
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const loadDetail = () => {
     if (selectedId == null) return;
-    setDetail(null);
     fetch(`/api/position-profiles/${selectedId}`)
       .then((r) => {
         if (!r.ok) throw new Error("Не вдалося завантажити профіль");
@@ -98,7 +113,194 @@ export default function CatalogPage() {
       })
       .then(setDetail)
       .catch((e) => setError(e.message));
+  };
+
+  useEffect(() => {
+    setDetail(null);
+    loadDetail();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId]);
+
+  // ── Компетенції: додавання/редагування/видалення ──
+  const [compFormOpen, setCompFormOpen] = useState(false);
+  const [editingCompId, setEditingCompId] = useState<number | null>(null);
+  const [compCode, setCompCode] = useState("");
+  const [compName, setCompName] = useState("");
+  const [compValidMonths, setCompValidMonths] = useState("");
+  const [compResetMonths, setCompResetMonths] = useState("");
+  const [compIsBonus, setCompIsBonus] = useState(false);
+  const [compError, setCompError] = useState<string | null>(null);
+  const [compSubmitting, setCompSubmitting] = useState(false);
+
+  const resetCompForm = () => {
+    setCompFormOpen(false);
+    setEditingCompId(null);
+    setCompCode("");
+    setCompName("");
+    setCompValidMonths("");
+    setCompResetMonths("");
+    setCompIsBonus(false);
+    setCompError(null);
+  };
+
+  const startEditCompetency = (c: CompetencyRow) => {
+    setCompFormOpen(true);
+    setEditingCompId(c.id);
+    setCompCode(c.code);
+    setCompName(c.name);
+    setCompValidMonths(c.validMonths != null ? String(c.validMonths) : "");
+    setCompResetMonths(c.resetOnBreakMonths != null ? String(c.resetOnBreakMonths) : "");
+    setCompIsBonus(c.isBonus);
+    setCompError(null);
+  };
+
+  const submitCompetency = () => {
+    setCompSubmitting(true);
+    const payload = {
+      code: compCode.trim(),
+      name: compName.trim(),
+      validMonths: compValidMonths ? Number(compValidMonths) : null,
+      resetOnBreakMonths: compResetMonths ? Number(compResetMonths) : null,
+      isBonus: compIsBonus,
+    };
+    const url = editingCompId ? `/api/competencies/${editingCompId}` : "/api/competencies";
+    fetch(url, {
+      method: editingCompId ? "PATCH" : "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    })
+      .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
+      .then(({ ok, body }) => {
+        if (!ok) throw new Error(body.error ?? "Не вдалося зберегти компетенцію");
+        resetCompForm();
+        loadCatalog();
+      })
+      .catch((e) => setCompError(e.message))
+      .finally(() => setCompSubmitting(false));
+  };
+
+  const deleteCompetency = (id: number) => {
+    if (!confirm("Видалити цю компетенцію з довідника?")) return;
+    fetch(`/api/competencies/${id}`, { method: "DELETE" })
+      .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
+      .then(({ ok, body }) => {
+        if (!ok) throw new Error(body.error ?? "Не вдалося видалити");
+        loadCatalog();
+      })
+      .catch((e) => setError(e.message));
+  };
+
+  // ── Матеріали: додавання/редагування/видалення ──
+  const [matFormOpen, setMatFormOpen] = useState(false);
+  const [editingMatId, setEditingMatId] = useState<number | null>(null);
+  const [matTitle, setMatTitle] = useState("");
+  const [matType, setMatType] = useState<"PDF" | "VIDEO" | "LINK">("PDF");
+  const [matCompetencyId, setMatCompetencyId] = useState("");
+  const [matUrl, setMatUrl] = useState("");
+  const [matDuration, setMatDuration] = useState("");
+  const [matSendViaBot, setMatSendViaBot] = useState(false);
+  const [matError, setMatError] = useState<string | null>(null);
+  const [matSubmitting, setMatSubmitting] = useState(false);
+
+  const resetMatForm = () => {
+    setMatFormOpen(false);
+    setEditingMatId(null);
+    setMatTitle("");
+    setMatType("PDF");
+    setMatCompetencyId("");
+    setMatUrl("");
+    setMatDuration("");
+    setMatSendViaBot(false);
+    setMatError(null);
+  };
+
+  const startEditMaterial = (m: MaterialRow) => {
+    setMatFormOpen(true);
+    setEditingMatId(m.id);
+    setMatTitle(m.title);
+    setMatType(m.type);
+    setMatCompetencyId(String(m.competencyId));
+    setMatUrl(m.url ?? "");
+    setMatDuration(m.durationMin != null ? String(m.durationMin) : "");
+    setMatSendViaBot(m.sendViaBot);
+    setMatError(null);
+  };
+
+  const submitMaterial = () => {
+    setMatSubmitting(true);
+    const url = editingMatId ? `/api/materials/${editingMatId}` : "/api/materials";
+    const payload: Record<string, unknown> = {
+      title: matTitle.trim(),
+      url: matUrl.trim() || null,
+      durationMin: matDuration ? Number(matDuration) : null,
+      sendViaBot: matSendViaBot,
+    };
+    if (!editingMatId) {
+      payload.type = matType;
+      payload.competencyId = Number(matCompetencyId);
+    }
+    fetch(url, {
+      method: editingMatId ? "PATCH" : "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    })
+      .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
+      .then(({ ok, body }) => {
+        if (!ok) throw new Error(body.error ?? "Не вдалося зберегти матеріал");
+        resetMatForm();
+        loadCatalog();
+      })
+      .catch((e) => setMatError(e.message))
+      .finally(() => setMatSubmitting(false));
+  };
+
+  const deleteMaterial = (id: number) => {
+    if (!confirm("Видалити цей матеріал?")) return;
+    fetch(`/api/materials/${id}`, { method: "DELETE" })
+      .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
+      .then(({ ok, body }) => {
+        if (!ok) throw new Error(body.error ?? "Не вдалося видалити");
+        loadCatalog();
+      })
+      .catch((e) => setError(e.message));
+  };
+
+  // ── Навчальний профіль посади: додати/прибрати компетенцію ──
+  const [attachCompetencyId, setAttachCompetencyId] = useState("");
+  const [attachError, setAttachError] = useState<string | null>(null);
+  const [attachSubmitting, setAttachSubmitting] = useState(false);
+
+  const attachCompetency = () => {
+    if (!selectedId || !attachCompetencyId) return;
+    setAttachSubmitting(true);
+    fetch(`/api/position-profiles/${selectedId}/competencies`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ competencyId: Number(attachCompetencyId) }),
+    })
+      .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
+      .then(({ ok, body }) => {
+        if (!ok) throw new Error(body.error ?? "Не вдалося додати компетенцію");
+        setAttachCompetencyId("");
+        setAttachError(null);
+        loadDetail();
+        loadCatalog();
+      })
+      .catch((e) => setAttachError(e.message))
+      .finally(() => setAttachSubmitting(false));
+  };
+
+  const detachCompetency = (competencyId: number) => {
+    if (!selectedId) return;
+    fetch(`/api/position-profiles/${selectedId}/competencies/${competencyId}`, { method: "DELETE" })
+      .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
+      .then(({ ok, body }) => {
+        if (!ok) throw new Error(body.error ?? "Не вдалося прибрати компетенцію");
+        loadDetail();
+        loadCatalog();
+      })
+      .catch((e) => setError(e.message));
+  };
 
   if (error) {
     return <div className="px-6 py-6 text-sm text-rose-700">{error}</div>;
@@ -182,6 +384,7 @@ export default function CatalogPage() {
                           <th className="px-4 py-2 font-medium">Строк дії</th>
                           <th className="px-4 py-2 font-medium">Обнулення при перерві</th>
                           <th className="px-4 py-2 font-medium text-right">Матеріали</th>
+                          {canEdit && <th className="px-4 py-2" />}
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
@@ -193,17 +396,50 @@ export default function CatalogPage() {
                             <td className="px-4 py-2 text-right text-slate-500">
                               {c.materials.length ? `${c.materials.length} матеріал(и)` : "—"}
                             </td>
+                            {canEdit && (
+                              <td className="px-4 py-2 text-right">
+                                <button onClick={() => detachCompetency(c.id)} className="text-xs text-rose-600 hover:text-rose-800">
+                                  прибрати
+                                </button>
+                              </td>
+                            )}
                           </tr>
                         ))}
                         {!detail.competencies.length && (
                           <tr>
-                            <td colSpan={4} className="px-4 py-8 text-center text-sm text-slate-500">
+                            <td colSpan={canEdit ? 5 : 4} className="px-4 py-8 text-center text-sm text-slate-500">
                               У цього профілю ще немає компетенцій у довіднику.
                             </td>
                           </tr>
                         )}
                       </tbody>
                     </table>
+                    {canEdit && (
+                      <div className="flex flex-wrap items-center gap-2 border-t border-slate-200 px-4 py-3">
+                        <select
+                          value={attachCompetencyId}
+                          onChange={(e) => setAttachCompetencyId(e.target.value)}
+                          className="rounded border border-slate-300 px-2 py-1.5 text-sm"
+                        >
+                          <option value="">— додати компетенцію —</option>
+                          {(competencies ?? [])
+                            .filter((c) => !detail.competencies.some((dc) => dc.id === c.id))
+                            .map((c) => (
+                              <option key={c.id} value={c.id}>
+                                {c.name}
+                              </option>
+                            ))}
+                        </select>
+                        <button
+                          onClick={attachCompetency}
+                          disabled={!attachCompetencyId || attachSubmitting}
+                          className="rounded bg-slate-900 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+                        >
+                          Додати
+                        </button>
+                        {attachError && <span className="text-sm text-rose-700">{attachError}</span>}
+                      </div>
+                    )}
                   </Section>
                 </>
               )}
@@ -212,7 +448,61 @@ export default function CatalogPage() {
         )}
 
         {tab === "comp" && (
-          <Section title="Компетенції">
+          <Section
+            title="Компетенції"
+            right={
+              canEdit && (
+                <button onClick={() => (compFormOpen ? resetCompForm() : setCompFormOpen(true))} className="text-sm text-slate-600 hover:text-slate-900">
+                  {compFormOpen ? "Скасувати" : "+ Додати компетенцію"}
+                </button>
+              )
+            }
+          >
+            {compFormOpen && (
+              <div className="space-y-2 border-b border-slate-200 bg-slate-50 px-4 py-3">
+                <div className="flex flex-wrap gap-2">
+                  <input
+                    value={compCode}
+                    onChange={(e) => setCompCode(e.target.value)}
+                    placeholder="Код (напр. FIRE_SAFETY)"
+                    disabled={!!editingCompId}
+                    className="w-56 rounded border border-slate-300 px-2 py-1.5 text-sm disabled:bg-slate-100"
+                  />
+                  <input
+                    value={compName}
+                    onChange={(e) => setCompName(e.target.value)}
+                    placeholder="Назва"
+                    className="w-64 rounded border border-slate-300 px-2 py-1.5 text-sm"
+                  />
+                  <input
+                    value={compValidMonths}
+                    onChange={(e) => setCompValidMonths(e.target.value)}
+                    placeholder="Строк дії, міс"
+                    type="number"
+                    className="w-36 rounded border border-slate-300 px-2 py-1.5 text-sm"
+                  />
+                  <input
+                    value={compResetMonths}
+                    onChange={(e) => setCompResetMonths(e.target.value)}
+                    placeholder="Обнулення, міс"
+                    type="number"
+                    className="w-36 rounded border border-slate-300 px-2 py-1.5 text-sm"
+                  />
+                  <label className="flex items-center gap-1.5 text-sm text-slate-700">
+                    <input type="checkbox" checked={compIsBonus} onChange={(e) => setCompIsBonus(e.target.checked)} />
+                    бонусна
+                  </label>
+                </div>
+                {compError && <p className="text-sm text-rose-700">{compError}</p>}
+                <button
+                  onClick={submitCompetency}
+                  disabled={!compCode.trim() || !compName.trim() || compSubmitting}
+                  className="rounded bg-slate-900 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+                >
+                  {editingCompId ? "Зберегти" : "Створити"}
+                </button>
+              </div>
+            )}
             <table className="w-full text-sm">
               <thead className="border-b border-slate-200 bg-slate-50 text-left text-xs text-slate-500">
                 <tr>
@@ -221,6 +511,7 @@ export default function CatalogPage() {
                   <th className="px-4 py-2 font-medium">Обнулення</th>
                   <th className="px-4 py-2 font-medium">Тип</th>
                   <th className="px-4 py-2 font-medium text-right">Посад використовують</th>
+                  {canEdit && <th className="px-4 py-2" />}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -237,6 +528,18 @@ export default function CatalogPage() {
                       )}
                     </td>
                     <td className="px-4 py-2 text-right tabular-nums text-slate-600">{c.positionsUsing}</td>
+                    {canEdit && (
+                      <td className="px-4 py-2 text-right">
+                        <div className="flex justify-end gap-2">
+                          <button onClick={() => startEditCompetency(c)} className="text-xs text-slate-600 hover:text-slate-900">
+                            редагувати
+                          </button>
+                          <button onClick={() => deleteCompetency(c.id)} className="text-xs text-rose-600 hover:text-rose-800">
+                            видалити
+                          </button>
+                        </div>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -245,7 +548,76 @@ export default function CatalogPage() {
         )}
 
         {tab === "mat" && (
-          <Section title="Навчальні матеріали">
+          <Section
+            title="Навчальні матеріали"
+            right={
+              canEdit && (
+                <button onClick={() => (matFormOpen ? resetMatForm() : setMatFormOpen(true))} className="text-sm text-slate-600 hover:text-slate-900">
+                  {matFormOpen ? "Скасувати" : "+ Додати матеріал"}
+                </button>
+              )
+            }
+          >
+            {matFormOpen && (
+              <div className="space-y-2 border-b border-slate-200 bg-slate-50 px-4 py-3">
+                <div className="flex flex-wrap gap-2">
+                  <input
+                    value={matTitle}
+                    onChange={(e) => setMatTitle(e.target.value)}
+                    placeholder="Назва матеріалу"
+                    className="w-64 rounded border border-slate-300 px-2 py-1.5 text-sm"
+                  />
+                  <select
+                    value={matType}
+                    onChange={(e) => setMatType(e.target.value as "PDF" | "VIDEO" | "LINK")}
+                    disabled={!!editingMatId}
+                    className="rounded border border-slate-300 px-2 py-1.5 text-sm disabled:bg-slate-100"
+                  >
+                    <option value="PDF">PDF</option>
+                    <option value="VIDEO">Відео</option>
+                    <option value="LINK">Посилання</option>
+                  </select>
+                  <select
+                    value={matCompetencyId}
+                    onChange={(e) => setMatCompetencyId(e.target.value)}
+                    disabled={!!editingMatId}
+                    className="rounded border border-slate-300 px-2 py-1.5 text-sm disabled:bg-slate-100"
+                  >
+                    <option value="">— компетенція —</option>
+                    {competencies.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    value={matUrl}
+                    onChange={(e) => setMatUrl(e.target.value)}
+                    placeholder="URL (необов'язково)"
+                    className="w-64 rounded border border-slate-300 px-2 py-1.5 text-sm"
+                  />
+                  <input
+                    value={matDuration}
+                    onChange={(e) => setMatDuration(e.target.value)}
+                    placeholder="Тривалість, хв"
+                    type="number"
+                    className="w-36 rounded border border-slate-300 px-2 py-1.5 text-sm"
+                  />
+                  <label className="flex items-center gap-1.5 text-sm text-slate-700">
+                    <input type="checkbox" checked={matSendViaBot} onChange={(e) => setMatSendViaBot(e.target.checked)} />
+                    надсилати ботом
+                  </label>
+                </div>
+                {matError && <p className="text-sm text-rose-700">{matError}</p>}
+                <button
+                  onClick={submitMaterial}
+                  disabled={!matTitle.trim() || (!editingMatId && !matCompetencyId) || matSubmitting}
+                  className="rounded bg-slate-900 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+                >
+                  {editingMatId ? "Зберегти" : "Створити"}
+                </button>
+              </div>
+            )}
             <table className="w-full text-sm">
               <thead className="border-b border-slate-200 bg-slate-50 text-left text-xs text-slate-500">
                 <tr>
@@ -253,6 +625,7 @@ export default function CatalogPage() {
                   <th className="px-4 py-2 font-medium">Тип</th>
                   <th className="px-4 py-2 font-medium">Компетенція</th>
                   <th className="px-4 py-2 font-medium text-right">Канал</th>
+                  {canEdit && <th className="px-4 py-2" />}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -270,6 +643,18 @@ export default function CatalogPage() {
                         {m.sendViaBot ? "бот" : "intranet"}
                       </span>
                     </td>
+                    {canEdit && (
+                      <td className="px-4 py-2 text-right">
+                        <div className="flex justify-end gap-2">
+                          <button onClick={() => startEditMaterial(m)} className="text-xs text-slate-600 hover:text-slate-900">
+                            редагувати
+                          </button>
+                          <button onClick={() => deleteMaterial(m.id)} className="text-xs text-rose-600 hover:text-rose-800">
+                            видалити
+                          </button>
+                        </div>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>

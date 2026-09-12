@@ -21,7 +21,7 @@ export async function findAncestorPath(path: string, type: OrgNodeType): Promise
   return null;
 }
 
-async function companyRootPath(): Promise<string | null> {
+export async function companyRootPath(): Promise<string | null> {
   const root = await prisma.orgNode.findFirst({ where: { type: OrgNodeType.COMPANY } });
   return root?.path ?? null;
 }
@@ -147,4 +147,18 @@ export async function can(
   }
 
   return false;
+}
+
+/**
+ * Компетенції/матеріали/зв'язок посада-компетенція — глобальні довідники
+ * (без orgNodeId), тому редагувати їх може лише той, чий MANAGE_MATERIALS
+ * покриває весь COMPANY-корінь. Докс дає "Адміністратор магазину"
+ * MANAGE_MATERIALS зі scope OWN_OBJECT — але per-об'єктного накладання на
+ * ці глобальні довідники в моделі ще нема, тож такий грант тут навмисно
+ * не спрацьовує (hasAccess(objectPath, companyRootPath) завжди false).
+ */
+export async function canManageCatalog(personId: number): Promise<boolean> {
+  const root = await companyRootPath();
+  if (!root) return false;
+  return can(personId, Capability.MANAGE_MATERIALS, { orgNodePath: root });
 }
