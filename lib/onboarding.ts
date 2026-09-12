@@ -59,6 +59,32 @@ export async function resolveAssignee(role: Role, targetOrgNodePath: string): Pr
  * куратора" (completeCuratorAssignmentTask нижче). null (пункти AUTO без
  * ролі) -> задача одразу DONE.
  */
+/**
+ * Пункт 11 базового шаблону ("Надсилання welcomebook і матеріалів LMS")
+ * раніше був AUTO-заглушкою — позначався DONE без реальної відправки.
+ * Тепер справді шле список sendViaBot-матеріалів позиції в Telegram
+ * (docs plan-v1.md §9.1: PDF/welcomebook дублюються в боті). Файлів як
+ * таких нема (Material.url/filePath у seed не заповнені) — шлемо назви
+ * списком, посилання, якщо є. Мовчки виходить, якщо в людини ще нема
+ * telegramId (окрема команда /link) або матеріалів немає.
+ */
+async function sendOnboardingMaterials(employment: { personId: number; staffUnit: { positionProfileId: number } }): Promise<void> {
+  const person = await prisma.person.findUnique({ where: { id: employment.personId } });
+  if (!person?.telegramId) return;
+
+  const materials = await prisma.material.findMany({
+    where: {
+      sendViaBot: true,
+      competency: { positionCompetencies: { some: { positionProfileId: employment.staffUnit.positionProfileId } } },
+    },
+    orderBy: { id: "asc" },
+  });
+  if (!materials.length) return;
+
+  const lines = materials.map((m) => `• ${m.title}${m.url ? ` — ${m.url}` : ""}`);
+  await sendTelegramMessage(person.telegramId, `Ласкаво просимо! Ваші навчальні матеріали для початку роботи:\n\n${lines.join("\n")}`);
+}
+
 export async function startOnboarding(employmentId: number): Promise<{ instanceId: number; alreadyExisted: boolean }> {
   const existing = await prisma.processInstance.findFirst({
     where: { employmentId, state: ProcessState.RUNNING },
@@ -99,6 +125,9 @@ export async function startOnboarding(employmentId: number): Promise<{ instanceI
     if (item.actionType === ActionType.AUTO) {
       status = TaskStatus.DONE;
       completedAt = now;
+      if (item.order === 11) {
+        await sendOnboardingMaterials(employment);
+      }
     } else if (item.responsibleRole === Role.EMPLOYEE) {
       assigneeId = employment.id;
     } else if (item.responsibleRole === Role.CURATOR) {

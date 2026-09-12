@@ -30,6 +30,13 @@ type RegistrationState = {
 
 const registrations = new Map<number, RegistrationState>();
 
+// ── /link: прив'язка Telegram до вже наявного акаунта (докс: адміни й
+// куратори, заведені до появи бота, не мають telegramId — без нього
+// сповіщення (заявка адміну, підопічний куратору) фізично нікуди слати).
+// Прив'язка теж через "поділитися контактом" (не текстом), щоб не можна
+// було ввести чужий номер — той самий принцип, що й у реєстрації.
+const linkRequests = new Set<number>();
+
 function normalizePhone(raw: string): string {
   const trimmed = raw.trim();
   return trimmed.startsWith("+") ? trimmed : `+${trimmed}`;
@@ -63,7 +70,10 @@ bot.command("start", async (ctx) => {
   const payload = ctx.match?.toString().trim();
 
   if (!payload) {
-    await ctx.reply("Вітаю! Це бот системи управління персоналом мережі «Коровай». Щоб зареєструватись, відскануйте QR-код на вашому об'єкті.");
+    await ctx.reply(
+      "Вітаю! Це бот системи управління персоналом мережі «Коровай». Щоб зареєструватись, відскануйте QR-код на вашому об'єкті.\n\n" +
+        "Якщо ви вже працюєте в компанії й хочете отримувати сповіщення сюди — напишіть /link.",
+    );
     return;
   }
 
@@ -93,6 +103,21 @@ bot.command("start", async (ctx) => {
   });
 
   await ctx.reply(`Реєстрація на об'єкт «${orgNode.name}».\n\nВведіть, будь ласка, ваше повне ім'я (прізвище, ім'я, по батькові).`);
+});
+
+bot.command("link", async (ctx) => {
+  if (!ctx.from) return;
+
+  const existing = await prisma.person.findUnique({ where: { telegramId: BigInt(ctx.from.id) } });
+  if (existing) {
+    await ctx.reply(`Ваш Telegram уже прив'язано до акаунта «${existing.fullName}».`);
+    return;
+  }
+
+  linkRequests.add(ctx.from.id);
+  await ctx.reply("Щоб прив'язати Telegram до вашого акаунта в системі, поділіться номером телефону кнопкою нижче.", {
+    reply_markup: new Keyboard().requestContact("Поділитися номером телефону").resized().oneTime(),
+  });
 });
 
 bot.on("message:text", async (ctx) => {
@@ -143,6 +168,43 @@ bot.on("message:text", async (ctx) => {
 });
 
 bot.on("message:contact", async (ctx) => {
+  if (linkRequests.has(ctx.from.id)) {
+    linkRequests.delete(ctx.from.id);
+
+    if (ctx.message.contact.user_id !== ctx.from.id) {
+      await ctx.reply("Поділіться, будь ласка, власним контактом (кнопкою нижче), а не чужим.");
+      return;
+    }
+
+    const phone = normalizePhone(ctx.message.contact.phone_number);
+    const person = await prisma.person.findUnique({ where: { phone } });
+
+    if (!person) {
+      await ctx.reply(
+        "Не знайшов у системі акаунт із цим номером телефону. Якщо ви ще не оформлені — зареєструйтесь по QR-коду на об'єкті.",
+        { reply_markup: { remove_keyboard: true } },
+      );
+      return;
+    }
+    if (person.telegramId) {
+      await ctx.reply("Цей номер телефону вже прив'язано до іншого Telegram-акаунта. Зверніться до адміністратора.", {
+        reply_markup: { remove_keyboard: true },
+      });
+      return;
+    }
+
+    try {
+      await prisma.person.update({ where: { id: person.id }, data: { telegramId: BigInt(ctx.from.id) } });
+      await ctx.reply(`Готово, ${person.fullName}! Ваш Telegram прив'язано до акаунта в системі — сповіщення надходитимуть сюди.`, {
+        reply_markup: { remove_keyboard: true },
+      });
+    } catch (error) {
+      console.error("Link error:", error);
+      await ctx.reply("Сталася помилка. Спробуйте ще раз пізніше.", { reply_markup: { remove_keyboard: true } });
+    }
+    return;
+  }
+
   const state = registrations.get(ctx.from.id);
   if (!state || state.step !== "phone") return;
 
