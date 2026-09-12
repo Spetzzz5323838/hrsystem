@@ -775,7 +775,7 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
   const [lastWorkingDay, setLastWorkingDay] = useState("");
   const [terminationStarting, setTerminationStarting] = useState(false);
   const [terminationBusyTaskId, setTerminationBusyTaskId] = useState<number | null>(null);
-  const [clearanceSheet, setClearanceSheet] = useState<{ number: string; isComplete: boolean; generatedAt: string } | null>(null);
+  const [clearanceSheet, setClearanceSheet] = useState<{ id: number; number: string; isComplete: boolean; generatedAt: string } | null>(null);
   const [clearanceSheetGenerating, setClearanceSheetGenerating] = useState(false);
 
   const loadTermination = () => {
@@ -786,6 +786,7 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
       })
       .then((data) => {
         setTerminationData(data);
+        if (data.clearanceSheet) setClearanceSheet(data.clearanceSheet);
         setTerminationError(null);
       })
       .catch((e) => setTerminationError(e.message));
@@ -1331,6 +1332,15 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
                       ) : (
                         <span className="text-amber-700">ПОПЕРЕДНІЙ — процедуру не завершено</span>
                       )}
+                      {" · "}
+                      <a
+                        href={`/api/clearance-sheets/${clearanceSheet.id}/file`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-slate-900 underline hover:no-underline"
+                      >
+                        завантажити PDF
+                      </a>
                     </span>
                   )}
                 </div>

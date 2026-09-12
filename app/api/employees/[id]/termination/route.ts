@@ -34,12 +34,21 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
     where: { employmentId, template: { type: ProcessType.OFFBOARDING } },
     orderBy: { startedAt: "desc" },
   });
-  if (!instance) return NextResponse.json({ instance: null, tasks: [] });
+  if (!instance) return NextResponse.json({ instance: null, tasks: [], clearanceSheet: null });
 
   const tasks = await getInstanceTasks(instance.id);
+
+  const clearanceSheet = await prisma.clearanceSheet.findFirst({
+    where: { instanceId: instance.id },
+    orderBy: { generatedAt: "desc" },
+  });
+
   return NextResponse.json({
     instance: { id: instance.id, state: instance.state, startedAt: instance.startedAt, finishedAt: instance.finishedAt },
     tasks,
+    clearanceSheet: clearanceSheet
+      ? { id: clearanceSheet.id, number: clearanceSheet.number, isComplete: clearanceSheet.isComplete, generatedAt: clearanceSheet.generatedAt }
+      : null,
   });
 }
 

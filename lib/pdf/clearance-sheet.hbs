@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8" />
+<style>
+  @page { size: A4; margin: 16mm 14mm; }
+  * { box-sizing: border-box; }
+  body { font-family: "DejaVu Sans", Arial, sans-serif; font-size: 11px; color: #111; }
+  h1 { font-size: 16px; margin: 0 0 4px; }
+  .muted { color: #555; }
+  .banner {
+    margin: 10px 0 14px;
+    padding: 8px 10px;
+    border: 1px solid #b45309;
+    background: #fffbeb;
+    color: #92400e;
+    font-weight: bold;
+  }
+  table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+  th, td { border: 1px solid #ccc; padding: 4px 6px; text-align: left; vertical-align: top; }
+  th { background: #f3f4f6; }
+  .header-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 16px; margin: 10px 0 14px; }
+  .header-grid div span.label { color: #555; }
+  .section-title { font-size: 12px; font-weight: bold; margin: 18px 0 4px; }
+  .summary-ok { color: #047857; font-weight: bold; }
+  .summary-bad { color: #b91c1c; font-weight: bold; }
+  .footer { margin-top: 24px; padding-top: 8px; border-top: 1px solid #ccc; font-size: 9px; color: #555; }
+  .hash { font-family: monospace; word-break: break-all; }
+</style>
+</head>
+<body>
+
+<h1>Лист узгодження звільнення № {{number}}</h1>
+<div class="muted">Внутрішній обхідний документ. Не є документом суворої звітності.</div>
+
+{{#unless isComplete}}
+<div class="banner">ПОПЕРЕДНІЙ — процедуру не завершено. Не всі обов&rsquo;язкові пункти закрито.</div>
+{{/unless}}
+
+<div class="header-grid">
+  <div><span class="label">ПІБ:</span> {{fullName}}</div>
+  <div><span class="label">Ініціатор:</span> {{initiatorName}}</div>
+  <div><span class="label">Посада:</span> {{positionTitle}}</div>
+  <div><span class="label">Дата ініціації:</span> {{startedAtStr}}</div>
+  <div><span class="label">Об&rsquo;єкт:</span> {{objectName}}</div>
+  <div><span class="label">Причина:</span> {{reasonName}}</div>
+  <div><span class="label">Дата прийому:</span> {{hiredAtStr}}</div>
+  <div><span class="label">Останній робочий день:</span> {{lastWorkingDayStr}}</div>
+</div>
+
+<div class="section-title">Пункти чек-листа</div>
+<table>
+  <thead>
+    <tr>
+      <th style="width: 5%">#</th>
+      <th>Пункт</th>
+      <th style="width: 20%">Відповідальний</th>
+      <th style="width: 12%">Статус</th>
+      <th style="width: 15%">Дата й час</th>
+      <th style="width: 18%">Коментар</th>
+    </tr>
+  </thead>
+  <tbody>
+    {{#each tasks}}
+    <tr>
+      <td>{{order}}</td>
+      <td>{{title}}</td>
+      <td>{{responsibleName}}</td>
+      <td>{{statusLabel}}</td>
+      <td>{{whenStr}}</td>
+      <td>{{comment}}</td>
+    </tr>
+    {{/each}}
+  </tbody>
+</table>
+
+<div class="section-title">Обладнання</div>
+{{#if equipment.length}}
+<table>
+  <thead>
+    <tr>
+      <th style="width: 25%">Інв. №</th>
+      <th>Назва</th>
+    </tr>
+  </thead>
+  <tbody>
+    {{#each equipment}}
+    <tr>
+      <td>{{inventoryNo}}</td>
+      <td>{{name}}</td>
+    </tr>
+    {{/each}}
+  </tbody>
+</table>
+{{else}}
+<div class="muted">Закріпленого обладнання немає (або вже квитовано на момент друку).</div>
+{{/if}}
+
+<div class="section-title">Підсумок</div>
+{{#if isComplete}}
+<div class="summary-ok">Усі обов&rsquo;язкові пункти закрито.</div>
+{{else}}
+<div class="summary-bad">Не закрито:</div>
+<ul>
+  {{#each unresolvedItems}}
+  <li>{{this}}</li>
+  {{/each}}
+</ul>
+{{/if}}
+
+<div class="footer">
+  <div>Сформував: {{generatedByName}} · {{generatedAtStr}}</div>
+  <div class="hash">Хеш для звірки: {{hash}}</div>
+</div>
+
+</body>
+</html>
