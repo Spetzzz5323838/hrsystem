@@ -160,6 +160,24 @@ const ACTION_LABEL: Record<string, string> = {
   TEST: "Позначити складеним",
 };
 
+// Пункти чек-листів переведення/звільнення, що стосуються конкретного
+// закріпленого обладнання — замість прямого виконання відкриваємо
+// вкладку "Обладнання", де це обладнання реально видно й можна
+// зняти/закріпити (докс: раніше це були прості MARK-пункти без
+// реального зв'язку з таблицею Equipment).
+const EQUIPMENT_TASK_TITLES = new Set([
+  "Квитування закріпленого обладнання",
+  "Передача ТМЦ і зняття обладнання",
+  "Закріплення обладнання на новому місці",
+]);
+
+/** Куди веде пункт чек-листа замість прямого виконання, якщо взагалі веде. */
+function checklistRedirectTab(task: { title: string; actionType: string }): "docs" | "equip" | null {
+  if (task.actionType === "UPLOAD") return "docs";
+  if (EQUIPMENT_TASK_TITLES.has(task.title)) return "equip";
+  return null;
+}
+
 function Checklist({
   tasks,
   myEmploymentIds,
@@ -880,8 +898,24 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
   const [scoreSubmitting, setScoreSubmitting] = useState(false);
   const [attestationDialogTaskId, setAttestationDialogTaskId] = useState<number | null>(null);
 
-  const completeTask = (taskId: number) => {
+  type PendingChecklistTask = {
+    taskId: number;
+    title: string;
+    process: "onboarding" | "transfer" | "termination";
+    kind: "docs" | "equip";
+  };
+  const [pendingChecklistTask, setPendingChecklistTask] = useState<PendingChecklistTask | null>(null);
+
+  const completeTask = (taskId: number, force?: boolean) => {
     const task = onboarding?.tasks.find((t) => t.taskId === taskId);
+    if (!force && task) {
+      const redirectTab = checklistRedirectTab(task);
+      if (redirectTab) {
+        setPendingChecklistTask({ taskId, title: task.title, process: "onboarding", kind: redirectTab });
+        setTab(redirectTab);
+        return;
+      }
+    }
     if (task?.title === "Призначення куратора") {
       setCuratorError(null);
       setCuratorDialogTaskId(taskId);
@@ -998,7 +1032,16 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
       .finally(() => setTransferStarting(false));
   };
 
-  const completeTransferTaskClick = (taskId: number) => {
+  const completeTransferTaskClick = (taskId: number, force?: boolean) => {
+    const task = transferData?.tasks.find((t) => t.taskId === taskId);
+    if (!force && task) {
+      const redirectTab = checklistRedirectTab(task);
+      if (redirectTab) {
+        setPendingChecklistTask({ taskId, title: task.title, process: "transfer", kind: redirectTab });
+        setTab(redirectTab);
+        return;
+      }
+    }
     setTransferBusyTaskId(taskId);
     fetch(`/api/tasks/${taskId}/complete`, { method: "POST" })
       .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
@@ -1064,7 +1107,16 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
       .finally(() => setTerminationStarting(false));
   };
 
-  const completeTerminationTaskClick = (taskId: number) => {
+  const completeTerminationTaskClick = (taskId: number, force?: boolean) => {
+    const task = terminationData?.tasks.find((t) => t.taskId === taskId);
+    if (!force && task) {
+      const redirectTab = checklistRedirectTab(task);
+      if (redirectTab) {
+        setPendingChecklistTask({ taskId, title: task.title, process: "termination", kind: redirectTab });
+        setTab(redirectTab);
+        return;
+      }
+    }
     setTerminationBusyTaskId(taskId);
     fetch(`/api/tasks/${taskId}/complete`, { method: "POST" })
       .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
@@ -1075,6 +1127,15 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
       })
       .catch((e) => setTerminationError(e.message))
       .finally(() => setTerminationBusyTaskId(null));
+  };
+
+  const completePendingChecklistTask = () => {
+    if (!pendingChecklistTask) return;
+    const { taskId, process } = pendingChecklistTask;
+    setPendingChecklistTask(null);
+    if (process === "onboarding") completeTask(taskId, true);
+    else if (process === "transfer") completeTransferTaskClick(taskId, true);
+    else completeTerminationTaskClick(taskId, true);
   };
 
   const printClearanceSheet = () => {
@@ -1847,6 +1908,21 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
 
         {tab === "docs" && (
           <div className="space-y-4">
+            {pendingChecklistTask?.kind === "docs" && (
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-300 bg-amber-50 px-4 py-3">
+                <span className="text-sm text-amber-900">
+                  Завантажте документ для пункту чек-листа «{pendingChecklistTask.title}», потім позначте пункт виконаним.
+                </span>
+                <div className="flex items-center gap-2">
+                  <button onClick={completePendingChecklistTask} className="rounded bg-amber-900 px-3 py-1.5 text-xs font-medium text-white">
+                    Пункт виконано
+                  </button>
+                  <button onClick={() => setPendingChecklistTask(null)} className="text-xs text-amber-800 hover:underline">
+                    скасувати
+                  </button>
+                </div>
+              </div>
+            )}
             <Section title="Завантажити документ">
               <div className="flex flex-wrap items-end gap-2 px-4 py-3">
                 <label className="block">
@@ -2255,6 +2331,21 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
 
         {tab === "equip" && (
           <div className="space-y-4">
+            {pendingChecklistTask?.kind === "equip" && (
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-300 bg-amber-50 px-4 py-3">
+                <span className="text-sm text-amber-900">
+                  Квитуйте або закріпіть обладнання для пункту чек-листа «{pendingChecklistTask.title}», потім позначте пункт виконаним.
+                </span>
+                <div className="flex items-center gap-2">
+                  <button onClick={completePendingChecklistTask} className="rounded bg-amber-900 px-3 py-1.5 text-xs font-medium text-white">
+                    Пункт виконано
+                  </button>
+                  <button onClick={() => setPendingChecklistTask(null)} className="text-xs text-amber-800 hover:underline">
+                    скасувати
+                  </button>
+                </div>
+              </div>
+            )}
             <Section title="Закріпити нове">
               <div className="flex flex-wrap items-end gap-2 px-4 py-3">
                 <label className="block">
