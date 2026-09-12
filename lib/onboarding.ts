@@ -1,6 +1,7 @@
 import { prisma } from "./prisma";
 import { hasAccess } from "./access";
 import { logAudit } from "./audit";
+import { sendTelegramMessage } from "./telegram";
 import {
   Role,
   ActionType,
@@ -219,7 +220,7 @@ export async function completeCuratorAssignmentTask(
 
   const curator = await prisma.employment.findUnique({
     where: { id: curatorEmploymentId },
-    include: { staffUnit: { include: { positionProfile: true } } },
+    include: { staffUnit: { include: { positionProfile: true } }, person: true },
   });
   if (!curator || curator.status === EmploymentStatus.TERMINATED) {
     return { ok: false, error: "Куратора не знайдено" };
@@ -228,10 +229,18 @@ export async function completeCuratorAssignmentTask(
     return { ok: false, error: "Ця людина не може бути куратором за профілем посади" };
   }
 
-  await prisma.employment.update({
+  const trainee = await prisma.employment.update({
     where: { id: task.instance.employmentId },
     data: { curatorId: curatorEmploymentId },
+    include: { person: true, staffUnit: { include: { positionProfile: true } } },
   });
+
+  if (curator.person.telegramId) {
+    await sendTelegramMessage(
+      curator.person.telegramId,
+      `У вас новий підопічний: ${trainee.person.fullName} (${trainee.staffUnit.positionProfile.title}). Чек-ліст онбордингу — в системі.`,
+    );
+  }
 
   await logAudit({
     actorId: completedByEmploymentId,

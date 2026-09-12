@@ -187,8 +187,30 @@ model OrgNode {
   permissionGrants PermissionGrant[]
   roleAssignments  RoleAssignment[]
   equipment        Equipment[]
+  pendingHires     PendingHire[]
 
   @@index([path])
+}
+
+/// Заявка на найм по QR — реєстрація через Telegram-бот, ще без посади.
+/// QR кодує об'єкт (`orgNodeId`), не штатну одиницю: адмін бачить факт
+/// реєстрації й сам призначає посаду й відділ (docs catalogs-v1.1 §6.1,
+/// п.3) — обираючи StaffUnit, що вже поєднує обидва. Розміщення
+/// (`POST /api/pending-hires/[id]/place`) створює Person + Employment і
+/// видаляє цей запис; поля тут навмисно дублюють Person, бо до розміщення
+/// Person ще не існує.
+model PendingHire {
+  id         Int      @id @default(autoincrement())
+  fullName   String
+  birthDate  DateTime
+  phone      String
+  email      String?
+  telegramId BigInt   @unique
+  orgNodeId  Int
+  orgNode    OrgNode  @relation(fields: [orgNodeId], references: [id])
+  createdAt  DateTime @default(now())
+
+  @@index([orgNodeId])
 }
 
 /// Фізична особа — окремо від факту роботи (Employment), щоб одна людина
@@ -201,6 +223,7 @@ model Person {
   birthDate       DateTime?
   telegramId      BigInt?   @unique
   phone           String    @unique
+  email           String?
   phoneVerifiedAt DateTime?
   passwordHash    String?
   externalRef     String?

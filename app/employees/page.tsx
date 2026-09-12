@@ -19,6 +19,19 @@ type EmployeeRow = {
 
 type ListResponse = { employees: EmployeeRow[]; objects: { id: number; name: string }[]; total: number };
 
+type PendingHireRow = {
+  id: number;
+  fullName: string;
+  birthDate: string;
+  phone: string;
+  email: string | null;
+  objectId: number;
+  objectName: string;
+  createdAt: string;
+};
+
+type StaffUnitOption = { id: number; positionTitle: string; objectName: string };
+
 const STATUS_LABELS: Record<string, { label: string; cls: string }> = {
   REGISTERED: { label: "Зареєстрований", cls: "bg-slate-100 text-slate-700 border-slate-300" },
   ACTIVATED: { label: "Активовано", cls: "bg-sky-50 text-sky-700 border-sky-200" },
@@ -59,6 +72,7 @@ export default function EmployeesPage() {
   const [objectFilter, setObjectFilter] = useState("");
   const [data, setData] = useState<ListResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
     const params = new URLSearchParams();
@@ -73,7 +87,54 @@ export default function EmployeesPage() {
       })
       .then(setData)
       .catch((e) => setError(e.message));
-  }, [q, statusFilter, objectFilter]);
+  }, [q, statusFilter, objectFilter, refreshKey]);
+
+  // ── Нові заявки (реєстрація по QR, ще без посади — PendingHire) ──
+  const [pendingHires, setPendingHires] = useState<PendingHireRow[] | null>(null);
+  const [pendingError, setPendingError] = useState<string | null>(null);
+  const [staffUnits, setStaffUnits] = useState<StaffUnitOption[]>([]);
+  const [placingId, setPlacingId] = useState<number | null>(null);
+  const [placingStaffUnitId, setPlacingStaffUnitId] = useState("");
+  const [placingSubmitting, setPlacingSubmitting] = useState(false);
+  const [placingError, setPlacingError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch("/api/pending-hires")
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("Не вдалося завантажити заявки"))))
+      .then((body) => {
+        setPendingHires(body.pendingHires);
+        setPendingError(null);
+      })
+      .catch((e) => setPendingError(e.message));
+    fetch("/api/staff-units")
+      .then((r) => (r.ok ? r.json() : []))
+      .then(setStaffUnits)
+      .catch(() => {});
+  }, [refreshKey]);
+
+  const startPlacing = (id: number) => {
+    setPlacingId(id);
+    setPlacingStaffUnitId("");
+    setPlacingError(null);
+  };
+
+  const confirmPlacing = (id: number) => {
+    if (!placingStaffUnitId) return;
+    setPlacingSubmitting(true);
+    fetch(`/api/pending-hires/${id}/place`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ staffUnitId: Number(placingStaffUnitId) }),
+    })
+      .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
+      .then(({ ok, body }) => {
+        if (!ok) throw new Error(body.error ?? "Не вдалося призначити посаду");
+        setPlacingId(null);
+        setRefreshKey((k) => k + 1);
+      })
+      .catch((e) => setPlacingError(e.message))
+      .finally(() => setPlacingSubmitting(false));
+  };
 
   if (error) {
     return <div className="px-6 py-6 text-sm text-rose-700">{error}</div>;
@@ -92,6 +153,68 @@ export default function EmployeesPage() {
             {data.employees.length} з {data.total}
           </span>
         </div>
+
+        {!!pendingHires?.length && (
+          <div className="overflow-hidden rounded-md border border-amber-300 bg-amber-50">
+            <div className="border-b border-amber-200 px-4 py-2 text-sm font-medium text-amber-900">
+              Нові заявки ({pendingHires.length}) — зареєстровані по QR, ще без посади
+            </div>
+            {pendingError && <p className="px-4 py-2 text-sm text-rose-700">{pendingError}</p>}
+            <table className="w-full text-sm">
+              <tbody className="divide-y divide-amber-100">
+                {pendingHires.map((p) => (
+                  <tr key={p.id}>
+                    <td className="px-4 py-2">
+                      <p className="font-medium text-slate-900">{p.fullName}</p>
+                      <p className="text-xs tabular-nums text-slate-500">
+                        {p.phone}
+                        {p.email ? ` · ${p.email}` : ""}
+                      </p>
+                    </td>
+                    <td className="px-4 py-2 text-slate-600">{p.objectName}</td>
+                    <td className="px-4 py-2 text-xs text-slate-500">{new Date(p.createdAt).toLocaleString("uk-UA")}</td>
+                    <td className="px-4 py-2 text-right">
+                      {placingId === p.id ? (
+                        <div className="flex items-center justify-end gap-2">
+                          <select
+                            value={placingStaffUnitId}
+                            onChange={(e) => setPlacingStaffUnitId(e.target.value)}
+                            className="rounded border border-slate-300 px-2 py-1 text-xs"
+                          >
+                            <option value="">— штатна одиниця —</option>
+                            {staffUnits.map((su) => (
+                              <option key={su.id} value={su.id}>
+                                {su.positionTitle} · {su.objectName}
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            onClick={() => confirmPlacing(p.id)}
+                            disabled={!placingStaffUnitId || placingSubmitting}
+                            className="rounded bg-slate-900 px-2 py-1 text-xs font-medium text-white disabled:opacity-50"
+                          >
+                            Підтвердити
+                          </button>
+                          <button onClick={() => setPlacingId(null)} className="text-xs text-slate-500 hover:text-slate-800">
+                            Скасувати
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => startPlacing(p.id)}
+                          className="rounded border border-amber-400 px-2 py-1 text-xs font-medium text-amber-900 hover:bg-amber-100"
+                        >
+                          Призначити посаду
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {placingError && <p className="px-4 py-2 text-sm text-rose-700">{placingError}</p>}
+          </div>
+        )}
 
         <div className="flex flex-wrap gap-2">
           <div className="relative">
