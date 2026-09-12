@@ -788,8 +788,10 @@ async function seedRatingCategories() {
 }
 
 // Каталог бейджів — docs v1.3 §3.1 (автоматичні) і §3.2 (номінації).
-// Реально автоматично рахується зараз лише "profile_closed" (є lib/competencies.ts);
-// решта isAuto=true — тільки довідник, тригера ще нема (свідома прогалина).
+// Реально рахуються (lib/rating.ts, тригер у lib/onboarding.ts::completeTask
+// після кожного CompetencyRecord): "profile_closed", "beyond_profile",
+// "fast_start", "mentor". Решта 3 (clean_streak/always_current/tenure) —
+// періодичні, не подієві, потребують pg-boss (свідома прогалина).
 type BadgeSeed = { code: string; name: string; description: string; isAuto: boolean };
 
 const badgeSeeds: BadgeSeed[] = [

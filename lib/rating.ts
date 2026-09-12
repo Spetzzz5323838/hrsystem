@@ -194,3 +194,68 @@ export async function checkProfileClosedBadge(personId: number): Promise<boolean
   await prisma.badgeAward.create({ data: { personId, badgeCode: "profile_closed", awardedById: null } });
   return true;
 }
+
+/**
+ * "Понад профіль" — складено хоч одну бонусну компетенцію (isBonus).
+ * Викликається з lib/onboarding.ts після будь-якого запису CompetencyRecord.
+ */
+export async function checkBeyondProfileBadge(personId: number): Promise<boolean> {
+  const existing = await prisma.badgeAward.findFirst({ where: { personId, badgeCode: "beyond_profile" } });
+  if (existing) return true;
+
+  const now = new Date();
+  const bonusRecord = await prisma.competencyRecord.findFirst({
+    where: { personId, competency: { isBonus: true }, OR: [{ validUntil: null }, { validUntil: { gt: now } }] },
+  });
+  if (!bonusRecord) return false;
+
+  await prisma.badgeAward.create({ data: { personId, badgeCode: "beyond_profile", awardedById: null } });
+  return true;
+}
+
+/**
+ * "Швидкий старт" — атестація з першого разу. Механізм атестації зараз
+ * не відстежує провал/повторні спроби (docs catalogs-v1.1 §7 — окремий,
+ * більший крок), тож кожне складання технічно й є єдиною ("першою")
+ * спробою — награда чесна відносно того, що система реально фіксує.
+ */
+export async function checkFastStartBadge(personId: number): Promise<boolean> {
+  const existing = await prisma.badgeAward.findFirst({ where: { personId, badgeCode: "fast_start" } });
+  if (existing) return true;
+
+  await prisma.badgeAward.create({ data: { personId, badgeCode: "fast_start", awardedById: null } });
+  return true;
+}
+
+/**
+ * "Наставник" — троє стажерів склали атестацію з першого разу під цим
+ * куратором. Рахує підопічних (Employment.curatorId) по всіх
+ * працевлаштуваннях людини-куратора, дивиться, скільком із них уже
+ * нараховано fast_start.
+ */
+export async function checkMentorBadge(curatorEmploymentId: number): Promise<boolean> {
+  const curatorEmployment = await prisma.employment.findUnique({ where: { id: curatorEmploymentId } });
+  if (!curatorEmployment) return false;
+
+  const existing = await prisma.badgeAward.findFirst({ where: { personId: curatorEmployment.personId, badgeCode: "mentor" } });
+  if (existing) return true;
+
+  const curatorEmploymentIds = (
+    await prisma.employment.findMany({ where: { personId: curatorEmployment.personId }, select: { id: true } })
+  ).map((e) => e.id);
+
+  const trainees = await prisma.employment.findMany({
+    where: { curatorId: { in: curatorEmploymentIds } },
+    select: { personId: true },
+  });
+  const traineePersonIds = [...new Set(trainees.map((t) => t.personId))];
+  if (!traineePersonIds.length) return false;
+
+  const fastStartCount = await prisma.badgeAward.count({
+    where: { badgeCode: "fast_start", personId: { in: traineePersonIds } },
+  });
+  if (fastStartCount < 3) return false;
+
+  await prisma.badgeAward.create({ data: { personId: curatorEmployment.personId, badgeCode: "mentor", awardedById: null } });
+  return true;
+}

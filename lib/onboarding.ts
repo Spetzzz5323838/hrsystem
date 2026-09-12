@@ -3,6 +3,7 @@ import { hasAccess } from "./access";
 import { logAudit } from "./audit";
 import { sendTelegramMessage } from "./telegram";
 import { getCompetencyDelta } from "./competencies";
+import { checkProfileClosedBadge, checkBeyondProfileBadge, checkFastStartBadge, checkMentorBadge } from "./rating";
 import {
   Role,
   ActionType,
@@ -263,6 +264,8 @@ export async function completeTask(
         source: CompetencySource.TEST,
       },
     });
+    await checkProfileClosedBadge(employment.personId);
+    await checkBeyondProfileBadge(employment.personId);
   }
 
   await prisma.task.update({
@@ -285,10 +288,15 @@ export async function completeTask(
       });
     }
 
+    await checkProfileClosedBadge(employment.personId);
+    await checkBeyondProfileBadge(employment.personId);
+
     // Докс plan-v1.md §8, п.10: "Атестацію складено → статус ACTIVE". Лише
     // для онбордингу — "Атестація за новим профілем" при переведенні йде
     // за власним переходом у lib/transfer.ts (гейтиться рештою пунктів
-    // переведення: обладнання тощо), тут його випереджати не можна.
+    // переведення: обладнання тощо), тут його випереджати не можна. Те
+    // саме для fast_start/mentor — це про перший вихід стажера на посаду,
+    // не про переведення.
     if (task.itemTemplate.title === "Атестація") {
       await prisma.employment.update({ where: { id: employment.id }, data: { status: EmploymentStatus.ACTIVE } });
       await logAudit({
@@ -297,6 +305,10 @@ export async function completeTask(
         entityType: "Employment",
         entityId: employment.id,
       });
+      await checkFastStartBadge(employment.personId);
+      if (employment.curatorId) {
+        await checkMentorBadge(employment.curatorId);
+      }
     }
   }
 
