@@ -1,6 +1,6 @@
 import { Bot, Keyboard } from "grammy";
 import { prisma } from "../lib/prisma";
-import { resolveAssignee } from "../lib/onboarding";
+import { resolveAssignee, confirmReadyForAttestation } from "../lib/onboarding";
 import { queueTelegramMessage, registerTelegramMessageWorker } from "../lib/notifications";
 import { getBoss } from "../lib/queue";
 import { checkSlaEscalations } from "../lib/sla";
@@ -282,6 +282,20 @@ bot.callbackQuery(/^review_ack:(\d+)$/, async (ctx) => {
 
   const lines = result.summary.map((r) => `Q${r.quarter} ${r.year}: ${r.weightedScore.toFixed(1)} / 5`);
   await ctx.reply(`Ваша динаміка по кварталах:\n\n${lines.join("\n")}`);
+});
+
+bot.callbackQuery(/^ready_for_attestation:(\d+)$/, async (ctx) => {
+  const employmentId = Number(ctx.match[1]);
+  const result = await confirmReadyForAttestation(employmentId, BigInt(ctx.from.id));
+
+  if (!result.ok) {
+    await ctx.answerCallbackQuery({ text: result.error, show_alert: true });
+    return;
+  }
+
+  await ctx.answerCallbackQuery({ text: "Підтверджено!" });
+  await ctx.editMessageReplyMarkup(undefined).catch(() => {});
+  await ctx.reply("Готовність до атестації підтверджено. Адміністратор сповіщений.");
 });
 
 bot.catch((err) => {

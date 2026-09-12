@@ -272,6 +272,15 @@ export async function completeTask(
   const employment = task.instance.employment;
   const now = new Date();
 
+  // Гейт готовності (докс §8, рядки 8-9): "Атестація" (тільки онбординг,
+  // за точною назвою — "Атестація за новим профілем" переведення власного
+  // гейту тут не має) можна закрити лише після того, як працівник сам
+  // підтвердив готовність кнопкою в боті — confirmReadyForAttestation
+  // нижче.
+  if (task.itemTemplate.title === "Атестація" && employment.status !== EmploymentStatus.READY_FOR_ATTESTATION) {
+    return { ok: false, error: "Працівник ще не підтвердив готовність до атестації" };
+  }
+
   if (task.itemTemplate.actionType === ActionType.TEST && task.itemTemplate.competencyId) {
     const score = input?.score;
     if (score == null || !Number.isFinite(score) || score < 0 || score > 100) {
@@ -370,15 +379,17 @@ export async function completeTask(
   }
 
   if (task.itemTemplate.title === "Стажування під наглядом куратора") {
-    await prisma.employment.update({ where: { id: employment.id }, data: { status: EmploymentStatus.READY_FOR_ATTESTATION } });
-    await logAudit({ actorId: completedByEmploymentId, action: "onboarding.readyForAttestation", entityType: "Employment", entityId: employment.id });
-
-    const storeAdminId = await resolveAssignee(Role.STORE_ADMIN, employment.staffUnit.orgNode.path);
-    if (storeAdminId) {
-      const admin = await prisma.employment.findUnique({ where: { id: storeAdminId }, include: { person: true } });
-      if (admin?.person.telegramId) {
-        await queueTelegramMessage(admin.person.telegramId, `${employment.person.fullName} готовий(-а) до атестації.`);
-      }
+    // Докс §8, рядки 8-9: статус не виставляється автоматично — працівник
+    // сам підтверджує готовність кнопкою в боті (лінійний персонал працює
+    // тільки через Telegram, архітектурне рішення №1). До натискання
+    // кнопки лишаємось у TRAINEE; READY_FOR_ATTESTATION і сповіщення
+    // адміністратора — у confirmReadyForAttestation нижче.
+    if (employment.person.telegramId) {
+      await queueTelegramMessage(
+        employment.person.telegramId,
+        "Стажування завершено. Якщо готові складати атестацію — підтвердіть.",
+        { inline_keyboard: [[{ text: "Готовий(-а) до атестації", callback_data: `ready_for_attestation:${employment.id}` }]] },
+      );
     }
   }
 
@@ -431,6 +442,59 @@ export async function completeTask(
       where: { id: task.instanceId },
       data: { state: ProcessState.DONE, finishedAt: now },
     });
+  }
+
+  return { ok: true };
+}
+
+/**
+ * Працівник підтверджує готовність до атестації кнопкою в боті (докс §8,
+ * рядки 8-9) — окремий крок після закриття "Стажування під наглядом
+ * куратора" (де раніше статус виставлявся одразу, без участі працівника).
+ * `telegramId` звіряється з самим працівником — той самий принцип, що й
+ * lib/review.ts::acknowledgeReview, callback_data з чужим employmentId
+ * не пройде.
+ */
+export async function confirmReadyForAttestation(
+  employmentId: number,
+  telegramId: bigint,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const employment = await prisma.employment.findUnique({
+    where: { id: employmentId },
+    include: { person: true, staffUnit: { include: { orgNode: true } } },
+  });
+  if (!employment) return { ok: false, error: "Працівника не знайдено" };
+  if (employment.person.telegramId !== telegramId) return { ok: false, error: "Це не ваш онбординг" };
+  if (employment.status !== EmploymentStatus.TRAINEE) return { ok: false, error: "Зараз не той етап онбордингу" };
+
+  await prisma.employment.update({ where: { id: employmentId }, data: { status: EmploymentStatus.READY_FOR_ATTESTATION } });
+  await logAudit({ actorId: employmentId, action: "onboarding.readyForAttestation", entityType: "Employment", entityId: employmentId });
+
+  // SLA "3 дні ПІСЛЯ ЗАЯВКИ" (докс §6.1) — саме зараз той момент, а не
+  // коли куратор закрив стажування (це вже сталось раніше й дало пункту
+  // dueAt від того часу через загальний механізм розблокування).
+  const instance = await prisma.processInstance.findFirst({
+    where: { employmentId, state: ProcessState.RUNNING, template: { type: ProcessType.ONBOARDING } },
+  });
+  if (instance) {
+    const attestationTask = await prisma.task.findFirst({
+      where: { instanceId: instance.id, status: TaskStatus.PENDING, itemTemplate: { title: "Атестація" } },
+      include: { itemTemplate: true },
+    });
+    if (attestationTask?.itemTemplate.slaHours != null) {
+      await prisma.task.update({
+        where: { id: attestationTask.id },
+        data: { dueAt: new Date(Date.now() + attestationTask.itemTemplate.slaHours * 60 * 60 * 1000) },
+      });
+    }
+  }
+
+  const storeAdminId = await resolveAssignee(Role.STORE_ADMIN, employment.staffUnit.orgNode.path);
+  if (storeAdminId) {
+    const admin = await prisma.employment.findUnique({ where: { id: storeAdminId }, include: { person: true } });
+    if (admin?.person.telegramId) {
+      await queueTelegramMessage(admin.person.telegramId, `${employment.person.fullName} готовий(-а) до атестації.`);
+    }
   }
 
   return { ok: true };

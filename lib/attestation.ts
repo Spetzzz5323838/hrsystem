@@ -74,6 +74,9 @@ export async function submitAttestation(
   if (task.status === "DONE") return { ok: false, error: "Уже виконано" };
 
   const employment = task.instance.employment;
+  if (employment.status !== EmploymentStatus.READY_FOR_ATTESTATION) {
+    return { ok: false, error: "Працівник ще не підтвердив готовність до атестації" };
+  }
   const form = await getAttestationForm(employment.staffUnit.positionProfileId);
   if (!form) return { ok: false, error: "Форма атестації для цієї посади не налаштована" };
 
