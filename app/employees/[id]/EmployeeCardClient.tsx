@@ -34,6 +34,8 @@ const STATUS_LABELS: Record<string, { label: string; cls: string }> = {
   TRAINEE: { label: "Стажер", cls: "bg-indigo-50 text-indigo-700 border-indigo-200" },
   READY_FOR_ATTESTATION: { label: "На атестацію", cls: "bg-amber-100 text-amber-900 border-amber-400" },
   ACTIVE: { label: "Працює", cls: "bg-emerald-50 text-emerald-700 border-emerald-200" },
+  TRANSFER_PENDING: { label: "Переводиться", cls: "bg-amber-50 text-amber-800 border-amber-300" },
+  FROZEN: { label: "Заморожений", cls: "bg-sky-50 text-sky-700 border-sky-200" },
   TERMINATION_STARTED: { label: "Звільняється", cls: "bg-rose-50 text-rose-700 border-rose-200" },
   TERMINATED: { label: "Звільнений", cls: "bg-slate-100 text-slate-500 border-slate-300" },
 };
