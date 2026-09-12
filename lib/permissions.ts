@@ -21,6 +21,19 @@ export async function findAncestorPath(path: string, type: OrgNodeType): Promise
   return null;
 }
 
+/** Найближчий по дереву вгору вузол із призначеним керівником (headEmploymentId). */
+export async function findNearestHead(path: string): Promise<number | null> {
+  const ids = path.split(".").map(Number);
+  const ancestors = await prisma.orgNode.findMany({ where: { id: { in: ids } } });
+  const byId = new Map(ancestors.map((a) => [a.id, a]));
+
+  for (let i = ids.length - 1; i >= 0; i--) {
+    const candidate = byId.get(ids[i]);
+    if (candidate?.headEmploymentId) return candidate.headEmploymentId;
+  }
+  return null;
+}
+
 export async function companyRootPath(): Promise<string | null> {
   const root = await prisma.orgNode.findFirst({ where: { type: OrgNodeType.COMPANY } });
   return root?.path ?? null;

@@ -1,7 +1,7 @@
 import { prisma } from "./prisma";
 import { hasAccess } from "./access";
 import { logAudit } from "./audit";
-import { sendTelegramMessage } from "./telegram";
+import { queueTelegramMessage } from "./notifications";
 import { getCompetencyDelta } from "./competencies";
 import { checkProfileClosedBadge, checkBeyondProfileBadge, checkFastStartBadge, checkMentorBadge } from "./rating";
 import {
@@ -91,7 +91,7 @@ async function sendOnboardingMaterials(employment: { personId: number; staffUnit
   if (!materials.length) return;
 
   const lines = materials.map((m) => `• ${m.title}${m.url ? ` — ${m.url}` : ""}`);
-  await sendTelegramMessage(person.telegramId, `Ласкаво просимо! Ваші навчальні матеріали для початку роботи:\n\n${lines.join("\n")}`);
+  await queueTelegramMessage(person.telegramId, `Ласкаво просимо! Ваші навчальні матеріали для початку роботи:\n\n${lines.join("\n")}`);
 }
 
 export async function startOnboarding(employmentId: number): Promise<{ instanceId: number; alreadyExisted: boolean }> {
@@ -359,7 +359,7 @@ export async function completeCuratorAssignmentTask(
   });
 
   if (curator.person.telegramId) {
-    await sendTelegramMessage(
+    await queueTelegramMessage(
       curator.person.telegramId,
       `У вас новий підопічний: ${trainee.person.fullName} (${trainee.staffUnit.positionProfile.title}). Чек-ліст онбордингу — в системі.`,
     );

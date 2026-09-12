@@ -1,24 +1,20 @@
 /**
- * Мінімальна відправка повідомлень у Telegram — прямий виклик Bot API,
- * без черги й ретраїв (pg-boss під це ще не піднятий, докс v1.md §8
- * планує чергу пізніше). Найкращий спосіб: помилка лише логується, не
- * кидається — відправка сповіщення ніколи не повинна ламати основну дію
- * (реєстрацію, призначення куратора тощо).
+ * Прямий виклик Bot API. Кидає при збої — навмисно: єдиний виклик
+ * тепер усередині pg-boss-воркера (lib/notifications.ts), де кинута
+ * помилка — це сигнал ретраю, а не збій дії користувача. Ніде більше
+ * цю функцію напряму викликати не варто (звідти виклик обійде чергу й
+ * повтори) — для відправки з коду використовуй queueTelegramMessage.
  */
 export async function sendTelegramMessage(telegramId: bigint, text: string): Promise<void> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) return;
 
-  try {
-    const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: telegramId.toString(), text }),
-    });
-    if (!response.ok) {
-      console.error("sendTelegramMessage failed:", await response.text());
-    }
-  } catch (error) {
-    console.error("sendTelegramMessage error:", error);
+  const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chat_id: telegramId.toString(), text }),
+  });
+  if (!response.ok) {
+    throw new Error(`sendTelegramMessage failed: ${await response.text()}`);
   }
 }

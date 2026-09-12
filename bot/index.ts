@@ -1,7 +1,10 @@
 import { Bot, Keyboard } from "grammy";
 import { prisma } from "../lib/prisma";
 import { resolveAssignee } from "../lib/onboarding";
-import { sendTelegramMessage } from "../lib/telegram";
+import { queueTelegramMessage, registerTelegramMessageWorker } from "../lib/notifications";
+import { getBoss } from "../lib/queue";
+import { checkSlaEscalations } from "../lib/sla";
+import { runPeriodicBadgeChecks } from "../lib/badges-periodic";
 import { Prisma, Role } from "../generated/prisma/client";
 
 const token = process.env.TELEGRAM_BOT_TOKEN;
@@ -238,7 +241,7 @@ bot.on("message:contact", async (ctx) => {
     if (adminEmploymentId) {
       const adminEmployment = await prisma.employment.findUnique({ where: { id: adminEmploymentId }, include: { person: true } });
       if (adminEmployment?.person.telegramId) {
-        await sendTelegramMessage(
+        await queueTelegramMessage(
           adminEmployment.person.telegramId,
           `Нова заявка на реєстрацію: ${state.fullName} (${state.orgNodeName}). Перевірте розділ «Нові заявки» в системі.`,
         );
@@ -263,6 +266,32 @@ bot.on("message:contact", async (ctx) => {
 bot.catch((err) => {
   console.error("Bot error:", err);
 });
+
+const SLA_CHECK_QUEUE = "sla-escalation-check";
+const BADGE_CHECK_QUEUE = "periodic-badge-check";
+
+/**
+ * Черга й планувальник живуть у процесі бота (не окремим третім
+ * процесом під PM2) — тут уже є довготривале з'єднання й Telegram-клієнт,
+ * яким і так треба надсилати результати обох перевірок.
+ */
+async function setupQueue() {
+  await registerTelegramMessageWorker();
+
+  const boss = await getBoss();
+
+  await boss.createQueue(SLA_CHECK_QUEUE);
+  await boss.work(SLA_CHECK_QUEUE, () => checkSlaEscalations());
+  await boss.schedule(SLA_CHECK_QUEUE, "0 * * * *"); // щогодини
+
+  await boss.createQueue(BADGE_CHECK_QUEUE);
+  await boss.work(BADGE_CHECK_QUEUE, () => runPeriodicBadgeChecks());
+  await boss.schedule(BADGE_CHECK_QUEUE, "0 3 * * *"); // раз на добу о 3:00
+
+  console.log("Черга й заплановані перевірки піднято.");
+}
+
+setupQueue().catch((err) => console.error("Не вдалося підняти чергу:", err));
 
 process.once("SIGINT", () => bot.stop());
 process.once("SIGTERM", () => bot.stop());

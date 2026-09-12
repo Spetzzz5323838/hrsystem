@@ -526,6 +526,11 @@ model Task {
   completedAt    DateTime?
   completedById  Int?
   completedBy    Employment?           @relation("TaskCompletedBy", fields: [completedById], references: [id])
+  /// SLA-ескалація (docs plan-v1.md §8, п.11): коли виконавця вже
+  /// сповіщено про протермінування й коли ескальовано керівнику вузла —
+  /// щоб щогодинна перевірка не дублювала сповіщення.
+  overdueNotifiedAt DateTime?
+  escalatedAt       DateTime?
 
   @@index([instanceId])
   @@index([assigneeId])
