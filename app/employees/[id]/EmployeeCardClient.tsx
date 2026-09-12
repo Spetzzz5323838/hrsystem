@@ -113,6 +113,7 @@ const AUDIT_ACTION_LABELS: Record<string, string> = {
   "onboarding.traineeStarted": "Розпочато стажування (TRAINEE)",
   "onboarding.readyForAttestation": "Готовий до атестації",
   "onboarding.activated": "Атестацію складено, статус ACTIVE",
+  "attestation.failed": "Атестацію не складено",
 };
 
 function auditActionLabel(action: string): string {
@@ -134,6 +135,7 @@ type TaskRow = {
   assigneeName: string | null;
   dueAt: string | null;
   completedAt: string | null;
+  attestationConfigured?: boolean;
 };
 
 type OnboardingData = {
@@ -397,6 +399,139 @@ function ScoreDialog({
             Зберегти
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+type AttestationFormItem = { id: number; order: number; title: string; maxPoints: number };
+type AttestationFormSection = { id: number; order: number; title: string; items: AttestationFormItem[] };
+type AttestationForm = { templateId: number; passThresholdPercent: number; maxScore: number; sections: AttestationFormSection[] };
+
+function AttestationDialog({
+  taskId,
+  onClose,
+  onSubmitted,
+}: {
+  taskId: number;
+  onClose: () => void;
+  onSubmitted: () => void;
+}) {
+  const [form, setForm] = useState<AttestationForm | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [scores, setScores] = useState<Record<number, number>>({});
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [result, setResult] = useState<{ passed: boolean; percent: number } | null>(null);
+
+  useEffect(() => {
+    fetch(`/api/tasks/${taskId}/attestation-form`)
+      .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
+      .then(({ ok, body }) => {
+        if (!ok) throw new Error(body.error ?? "Не вдалося завантажити форму");
+        setForm(body);
+        const initial: Record<number, number> = {};
+        for (const s of body.sections as AttestationFormSection[]) {
+          for (const i of s.items) initial[i.id] = 0;
+        }
+        setScores(initial);
+      })
+      .catch((e) => setLoadError(e.message));
+  }, [taskId]);
+
+  const total = Object.values(scores).reduce((sum, v) => sum + v, 0);
+
+  const submit = () => {
+    if (!form) return;
+    setSubmitting(true);
+    setSubmitError(null);
+    fetch(`/api/tasks/${taskId}/attestation`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ scores: Object.entries(scores).map(([itemId, score]) => ({ itemId: Number(itemId), score })) }),
+    })
+      .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
+      .then(({ ok, body }) => {
+        if (!ok) throw new Error(body.error ?? "Не вдалося зберегти атестацію");
+        setResult({ passed: body.passed, percent: body.percent });
+        onSubmitted();
+      })
+      .catch((e) => setSubmitError(e.message))
+      .finally(() => setSubmitting(false));
+  };
+
+  return (
+    <div className="fixed inset-0 z-20 flex items-center justify-center bg-slate-900/40 px-4">
+      <div className="max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-md bg-white p-5">
+        <div className="flex items-start justify-between">
+          <h3 className="text-lg font-semibold text-slate-900">Атестація</h3>
+          <button onClick={onClose}>
+            <X size={18} className="text-slate-400" />
+          </button>
+        </div>
+
+        {loadError && <p className="mt-3 text-sm text-rose-700">{loadError}</p>}
+
+        {result ? (
+          <div className="mt-4 space-y-2">
+            <p className={`text-lg font-semibold ${result.passed ? "text-emerald-700" : "text-rose-700"}`}>
+              {result.passed ? "Складено" : "Не складено"} — {result.percent}%
+            </p>
+            {!result.passed && <p className="text-sm text-slate-600">Пункт лишився невиконаним — можна перескладати пізніше.</p>}
+            <button onClick={onClose} className="mt-2 rounded bg-slate-900 px-3 py-1.5 text-sm font-medium text-white">
+              Закрити
+            </button>
+          </div>
+        ) : (
+          form && (
+            <div className="mt-4 space-y-4">
+              <p className="text-sm text-slate-500">Прохідний бал: {form.passThresholdPercent}% від {form.maxScore}</p>
+              {form.sections.map((section) => (
+                <div key={section.id}>
+                  <h4 className="mb-1.5 text-sm font-semibold text-slate-800">{section.title}</h4>
+                  <div className="space-y-1.5">
+                    {section.items.map((item) => (
+                      <div key={item.id} className="flex items-center justify-between gap-3">
+                        <span className="text-sm text-slate-700">{item.title}</span>
+                        <input
+                          type="number"
+                          min={0}
+                          max={item.maxPoints}
+                          value={scores[item.id] ?? 0}
+                          onChange={(e) =>
+                            setScores((prev) => ({ ...prev, [item.id]: Math.max(0, Math.min(item.maxPoints, Number(e.target.value))) }))
+                          }
+                          className="w-16 rounded border border-slate-300 px-2 py-1 text-right text-sm"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+
+              <div className="flex items-center justify-between border-t border-slate-200 pt-3">
+                <span className="text-sm font-medium text-slate-700">
+                  Разом: {total} / {form.maxScore} ({Math.round((total / form.maxScore) * 100)}%)
+                </span>
+              </div>
+
+              {submitError && <p className="text-sm text-rose-700">{submitError}</p>}
+
+              <div className="flex justify-end gap-2">
+                <button onClick={onClose} className="rounded border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-50">
+                  Скасувати
+                </button>
+                <button
+                  disabled={submitting}
+                  onClick={submit}
+                  className="rounded bg-slate-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50"
+                >
+                  Зберегти результат
+                </button>
+              </div>
+            </div>
+          )
+        )}
       </div>
     </div>
   );
@@ -732,6 +867,7 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
   const [scoreDialogTaskId, setScoreDialogTaskId] = useState<number | null>(null);
   const [scoreError, setScoreError] = useState<string | null>(null);
   const [scoreSubmitting, setScoreSubmitting] = useState(false);
+  const [attestationDialogTaskId, setAttestationDialogTaskId] = useState<number | null>(null);
 
   const completeTask = (taskId: number) => {
     const task = onboarding?.tasks.find((t) => t.taskId === taskId);
@@ -747,6 +883,10 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
     if (task?.actionType === "TEST") {
       setScoreError(null);
       setScoreDialogTaskId(taskId);
+      return;
+    }
+    if (task?.title === "Атестація" && task.attestationConfigured) {
+      setAttestationDialogTaskId(taskId);
       return;
     }
 
@@ -1284,6 +1424,16 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
                 error={scoreError}
                 onClose={() => setScoreDialogTaskId(null)}
                 onSubmit={submitScore}
+              />
+            )}
+            {attestationDialogTaskId && (
+              <AttestationDialog
+                taskId={attestationDialogTaskId}
+                onClose={() => setAttestationDialogTaskId(null)}
+                onSubmitted={() => {
+                  loadOnboarding();
+                  loadDetail();
+                }}
               />
             )}
           </>

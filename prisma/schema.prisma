@@ -315,6 +315,8 @@ model Employment {
   uploadedDocuments    Document[]
   responsibleEquipment Equipment[]
   auditActions         AuditLog[]
+  attestationAttempts  AttestationAttempt[]
+  gradedAttestations   AttestationAttempt[] @relation("AttestationGradedBy")
 
   @@index([personId])
   @@index([staffUnitId])
@@ -338,6 +340,7 @@ model PositionProfile {
   staffUnits           StaffUnit[]
   permissionGrants     PermissionGrant[]
   positionCompetencies PositionCompetency[]
+  attestationTemplate  AttestationTemplate?
 }
 
 /// Штатна одиниця — посада, розставлена в конкретний вузол дерева.
@@ -482,15 +485,88 @@ model ChecklistItemTemplate {
   isBlocking      Boolean         @default(true)
   slaHours        Int?
   module          ChecklistModule?
-  /// Прив'язка для actionType=TEST — яку компетенцію підтверджує складання
-  /// (обмежений крок "механізм атестації": лише запис результату, без
-  /// відсоткових розділів і провалу/повторних спроб з docs catalogs-v1.1 §7).
+  /// Прив'язка для actionType=TEST — яку компетенцію підтверджує складання.
   competencyId    Int?
   competency      Competency?      @relation(fields: [competencyId], references: [id])
 
   tasks Task[]
 
   @@index([templateId])
+}
+
+/// Конструктор чек-листа атестації (docs catalogs-v1.1 §7) — один на
+/// посаду, SYSADMIN редагує через /catalog без розробника. Без формальних
+/// версій (на відміну від ProcessTemplate): AttestationAttempt зберігає
+/// власний знімок passThresholdPercent/maxScore на момент складання, тож
+/// редагування шаблона заднім числом не переписує вже здані спроби.
+model AttestationTemplate {
+  id                   Int             @id @default(autoincrement())
+  positionProfileId    Int             @unique
+  positionProfile      PositionProfile @relation(fields: [positionProfileId], references: [id])
+  passThresholdPercent Int
+
+  sections AttestationSection[]
+}
+
+model AttestationSection {
+  id         Int                 @id @default(autoincrement())
+  templateId Int
+  template   AttestationTemplate @relation(fields: [templateId], references: [id])
+  order      Int
+  title      String
+
+  items AttestationItem[]
+
+  @@index([templateId])
+}
+
+/// maxPoints зазвичай 2 (докс: "у кожному пункти з оцінкою 0/1/2"), але
+/// для розділів з одним-двома пунктами на всю суму розділу (напр.
+/// "Практика" у прикладах докс) — вище, щоб сума розділу збігалася з
+/// задокументованою.
+model AttestationItem {
+  id        Int                @id @default(autoincrement())
+  sectionId Int
+  section   AttestationSection @relation(fields: [sectionId], references: [id])
+  order     Int
+  title     String
+  maxPoints Int                @default(2)
+
+  scores AttestationItemScore[]
+
+  @@index([sectionId])
+}
+
+/// Одна спроба скласти атестацію. passThresholdPercent/maxScore —
+/// знімок на момент складання (docs catalogs-v1.1 §7.3: історія спроб не
+/// повинна "переписуватись", якщо адмін пізніше відредагує форму).
+model AttestationAttempt {
+  id                   Int        @id @default(autoincrement())
+  employmentId         Int
+  employment           Employment @relation(fields: [employmentId], references: [id])
+  attemptNumber        Int
+  totalScore           Int
+  maxScore             Int
+  passThresholdPercent Int
+  passed               Boolean
+  gradedById           Int
+  gradedBy             Employment @relation("AttestationGradedBy", fields: [gradedById], references: [id])
+  occurredAt           DateTime   @default(now())
+
+  itemScores AttestationItemScore[]
+
+  @@index([employmentId])
+}
+
+model AttestationItemScore {
+  id        Int                @id @default(autoincrement())
+  attemptId Int
+  attempt   AttestationAttempt @relation(fields: [attemptId], references: [id])
+  itemId    Int
+  item      AttestationItem    @relation(fields: [itemId], references: [id])
+  score     Int
+
+  @@index([attemptId])
 }
 
 /// Конкретний запуск шаблону для конкретного працевлаштування.

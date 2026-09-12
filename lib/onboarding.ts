@@ -170,6 +170,8 @@ export type TaskView = {
   assigneeName: string | null;
   dueAt: Date | null;
   completedAt: Date | null;
+  /** Тільки для пункту "Атестація": чи налаштована для цієї посади форма з розділами (docs catalogs-v1.1 §7). */
+  attestationConfigured?: boolean;
 };
 
 /** Тасклист інстансу з порахованим blocked/overdue (не зберігається — рахується тут). */
@@ -185,6 +187,16 @@ export async function getInstanceTasks(instanceId: number): Promise<TaskView[]> 
 
   const firstOpenIndex = tasks.findIndex((t) => t.status !== TaskStatus.DONE && t.itemTemplate.isBlocking);
   const now = new Date();
+
+  const hasAttestationTask = tasks.some((t) => t.itemTemplate.title === "Атестація");
+  let attestationConfigured = false;
+  if (hasAttestationTask) {
+    const instance = await prisma.processInstance.findUnique({
+      where: { id: instanceId },
+      select: { employment: { select: { staffUnit: { select: { positionProfile: { select: { attestationTemplate: { select: { id: true } } } } } } } } },
+    });
+    attestationConfigured = !!instance?.employment.staffUnit.positionProfile.attestationTemplate;
+  }
 
   return tasks.map((t, i) => {
     const blocked = t.itemTemplate.isBlocking && firstOpenIndex !== -1 && i > firstOpenIndex && t.status !== TaskStatus.DONE;
@@ -205,6 +217,7 @@ export async function getInstanceTasks(instanceId: number): Promise<TaskView[]> 
       assigneeName: t.assignee?.person.fullName ?? null,
       dueAt: t.dueAt,
       completedAt: t.completedAt,
+      attestationConfigured: t.itemTemplate.title === "Атестація" ? attestationConfigured : undefined,
     };
   });
 }
@@ -212,15 +225,20 @@ export async function getInstanceTasks(instanceId: number): Promise<TaskView[]> 
 /**
  * Позначає задачу виконаною — тільки якщо вона не заблокована й ще не DONE.
  *
- * Механізм атестації (звужений обсяг — docs catalogs-v1.1 §7 описує повний
- * конструктор із відсотковими розділами й провалом/повторними спробами,
- * тут лише запис результату):
+ * Компетенції й атестація:
  * - пункт actionType=TEST із прив'язаною компетенцією (`itemTemplate.competencyId`)
  *   вимагає `input.score` і пише CompetencyRecord(source=TEST) для неї;
  * - пункт із назвою, що починається на "Атестація" (і онбординг, і
  *   "Атестація за новим профілем" при переведенні — обидва йдуть через
  *   цю саму функцію), при виконанні закриває решту дельти профілю
  *   CompetencyRecord(source=ATTESTATION) — усе, що ще не valid.
+ *
+ * Для точної назви "Атестація" (тільки онбординг) це — прохід через
+ * ПРОСТЕ виконання пункту (без форми): або посада ще не має налаштованого
+ * конструктора атестації (docs catalogs-v1.1 §7), або виклик прийшов від
+ * lib/attestation.ts::submitAttestation після успішного складання за
+ * формою — там усе очікуване (провал/повторні спроби/ескалація) вже
+ * оброблено раніше, сюди довходить лише "склав".
  */
 export async function completeTask(
   taskId: number,

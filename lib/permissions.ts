@@ -175,3 +175,10 @@ export async function canManageCatalog(personId: number): Promise<boolean> {
   if (!root) return false;
   return can(personId, Capability.MANAGE_MATERIALS, { orgNodePath: root });
 }
+
+/** Конструктор чек-листів і атестації (docs: "SYSADMIN створює й редагує без розробника") — MANAGE_TEMPLATES, COMPANY-скоуп. */
+export async function canManageTemplates(personId: number): Promise<boolean> {
+  const root = await companyRootPath();
+  if (!root) return false;
+  return can(personId, Capability.MANAGE_TEMPLATES, { orgNodePath: root });
+}
