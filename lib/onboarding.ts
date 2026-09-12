@@ -233,7 +233,13 @@ export async function completeTask(
       itemTemplate: true,
       instance: {
         include: {
-          employment: { include: { staffUnit: { include: { positionProfile: true } } } },
+          employment: {
+            include: {
+              person: true,
+              curator: { include: { person: true } },
+              staffUnit: { include: { positionProfile: true, orgNode: true } },
+            },
+          },
         },
       },
     },
@@ -272,6 +278,71 @@ export async function completeTask(
     where: { id: taskId },
     data: { status: TaskStatus.DONE, completedAt: now, completedById: completedByEmploymentId },
   });
+
+  // Стан-машина онбордингу (docs plan-v1.md §7). Прив'язка до назв
+  // пунктів ONBOARDING_BASE — order у Prisma унікальний лише в межах
+  // одного шаблону (у TRANSFER_BASE є свій пункт з тим самим номером,
+  // але іншою назвою), тому саме назва тут — гарантія, що це справді
+  // онбординг, а не переведення чи звільнення.
+  if (task.itemTemplate.title === "Призначення куратора") {
+    // ACTIVATED — миттєвий прохідний стан: одразу переходимо в
+    // DOCUMENTS_PENDING, поки Оператор 1С і Бухгалтер обробляють свої
+    // пункти (5-7), окремо фіксуючи обидва в AuditLog.
+    await prisma.employment.update({ where: { id: employment.id }, data: { status: EmploymentStatus.ACTIVATED } });
+    await logAudit({ actorId: completedByEmploymentId, action: "onboarding.profileActivated", entityType: "Employment", entityId: employment.id });
+    await prisma.employment.update({ where: { id: employment.id }, data: { status: EmploymentStatus.DOCUMENTS_PENDING } });
+    await logAudit({ actorId: completedByEmploymentId, action: "onboarding.documentsPending", entityType: "Employment", entityId: employment.id });
+
+    if (employment.person.telegramId) {
+      await queueTelegramMessage(
+        employment.person.telegramId,
+        "Ваш профіль активовано. Зверніться до оператора 1С і бухгалтерії для оформлення.",
+      );
+    }
+    const onecTask = await prisma.task.findFirst({
+      where: { instanceId: task.instanceId, itemTemplate: { title: "Реєстрація в 1С, генерація пароля" } },
+      include: { assignee: { include: { person: true } } },
+    });
+    if (onecTask?.assignee?.person.telegramId) {
+      await queueTelegramMessage(onecTask.assignee.person.telegramId, `Нова задача: реєстрація в 1С для ${employment.person.fullName}.`);
+    }
+    const accountantTask = await prisma.task.findFirst({
+      where: { instanceId: task.instanceId, itemTemplate: { title: "Прийом і сканування документів" } },
+      include: { assignee: { include: { person: true } } },
+    });
+    if (accountantTask?.assignee?.person.telegramId) {
+      await queueTelegramMessage(accountantTask.assignee.person.telegramId, `Нова задача: прийом документів для ${employment.person.fullName}.`);
+    }
+  }
+
+  if (task.itemTemplate.title === "Оформлення прийому (заява, наказ)") {
+    await prisma.employment.update({ where: { id: employment.id }, data: { status: EmploymentStatus.TRAINEE } });
+    await logAudit({ actorId: completedByEmploymentId, action: "onboarding.traineeStarted", entityType: "Employment", entityId: employment.id });
+
+    const storeAdminId = await resolveAssignee(Role.STORE_ADMIN, employment.staffUnit.orgNode.path);
+    if (storeAdminId) {
+      const admin = await prisma.employment.findUnique({ where: { id: storeAdminId }, include: { person: true } });
+      if (admin?.person.telegramId) {
+        await queueTelegramMessage(admin.person.telegramId, `Оформлення ${employment.person.fullName} завершено — можна розпочинати навчання.`);
+      }
+    }
+    if (employment.curator?.person.telegramId) {
+      await queueTelegramMessage(employment.curator.person.telegramId, `Оформлення ${employment.person.fullName} завершено — можна розпочинати стажування.`);
+    }
+  }
+
+  if (task.itemTemplate.title === "Стажування під наглядом куратора") {
+    await prisma.employment.update({ where: { id: employment.id }, data: { status: EmploymentStatus.READY_FOR_ATTESTATION } });
+    await logAudit({ actorId: completedByEmploymentId, action: "onboarding.readyForAttestation", entityType: "Employment", entityId: employment.id });
+
+    const storeAdminId = await resolveAssignee(Role.STORE_ADMIN, employment.staffUnit.orgNode.path);
+    if (storeAdminId) {
+      const admin = await prisma.employment.findUnique({ where: { id: storeAdminId }, include: { person: true } });
+      if (admin?.person.telegramId) {
+        await queueTelegramMessage(admin.person.telegramId, `${employment.person.fullName} готовий(-а) до атестації.`);
+      }
+    }
+  }
 
   if (task.itemTemplate.title.startsWith("Атестація")) {
     const delta = await getCompetencyDelta(employment.personId, employment.staffUnit.positionProfileId);

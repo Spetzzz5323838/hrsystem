@@ -108,6 +108,10 @@ const AUDIT_ACTION_LABELS: Record<string, string> = {
   "termination.started": "Ініційовано звільнення",
   "termination.completed": "Звільнення завершено",
   "curator.assigned": "Призначено куратора",
+  "onboarding.profileActivated": "Профіль активовано (ACTIVATED)",
+  "onboarding.documentsPending": "Очікує оформлення документів",
+  "onboarding.traineeStarted": "Розпочато стажування (TRAINEE)",
+  "onboarding.readyForAttestation": "Готовий до атестації",
   "onboarding.activated": "Атестацію складено, статус ACTIVE",
 };
 
