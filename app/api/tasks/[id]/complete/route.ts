@@ -42,7 +42,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   } else if (task.instance.template.type === ProcessType.OFFBOARDING) {
     result = await completeTerminationTask(taskId, task.assignee.id);
   } else {
-    result = await completeTask(taskId, task.assignee.id);
+    const score = body?.score !== undefined ? Number(body.score) : undefined;
+    result = await completeTask(taskId, task.assignee.id, { score });
   }
 
   if (!result.ok) return NextResponse.json({ error: result.error }, { status: 409 });

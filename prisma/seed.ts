@@ -663,6 +663,7 @@ type ChecklistItemSeed = {
   isBlocking: boolean;
   slaHours: number | null;
   module: ChecklistModule | null;
+  competencyCode?: string;
 };
 
 const baseChecklistItems: ChecklistItemSeed[] = [
@@ -687,7 +688,7 @@ const moduleChecklistItems: ChecklistItemSeed[] = [
   { order: 100, title: "Реєстрація на касовому апараті", responsibleRole: Role.ONEC_ADMIN, actionType: ActionType.MARK, isBlocking: true, slaHours: 24, module: ChecklistModule.CASHIER },
   { order: 101, title: "Навчання роботі з ПРРО й поверненнями", responsibleRole: Role.CURATOR, actionType: ActionType.MARK, isBlocking: true, slaHours: 48, module: ChecklistModule.CASHIER },
   { order: 102, title: "Інструктаж з інкасації", responsibleRole: Role.STORE_ADMIN, actionType: ActionType.MARK, isBlocking: true, slaHours: 24, module: ChecklistModule.CASHIER },
-  { order: 103, title: "Тест «Каса»", responsibleRole: Role.EMPLOYEE, actionType: ActionType.TEST, isBlocking: true, slaHours: 168, module: ChecklistModule.CASHIER },
+  { order: 103, title: "Тест «Каса»", responsibleRole: Role.EMPLOYEE, actionType: ActionType.TEST, isBlocking: true, slaHours: 168, module: ChecklistModule.CASHIER, competencyCode: "CASHIER_PRRO" },
 
   { order: 110, title: "Договір про матвідповідальність", responsibleRole: Role.ACCOUNTANT, actionType: ActionType.MARK, isBlocking: true, slaHours: 72, module: ChecklistModule.MVO },
   { order: 111, title: "Прийом-передача ТМЦ", responsibleRole: Role.STORE_ADMIN, actionType: ActionType.MARK, isBlocking: true, slaHours: 72, module: ChecklistModule.MVO },
@@ -697,13 +698,13 @@ const moduleChecklistItems: ChecklistItemSeed[] = [
   { order: 121, title: "Інструктаж з санітарії та HACCP", responsibleRole: Role.STORE_ADMIN, actionType: ActionType.MARK, isBlocking: true, slaHours: 24, module: ChecklistModule.FOOD },
   { order: 122, title: "Правила особистої гігієни", responsibleRole: Role.STORE_ADMIN, actionType: ActionType.MARK, isBlocking: false, slaHours: 24, module: ChecklistModule.FOOD },
   { order: 123, title: "Видача санітарного одягу", responsibleRole: Role.STORE_ADMIN, actionType: ActionType.MARK, isBlocking: false, slaHours: 72, module: ChecklistModule.FOOD },
-  { order: 124, title: "Тест «Санітарія»", responsibleRole: Role.EMPLOYEE, actionType: ActionType.TEST, isBlocking: true, slaHours: 168, module: ChecklistModule.FOOD },
+  { order: 124, title: "Тест «Санітарія»", responsibleRole: Role.EMPLOYEE, actionType: ActionType.TEST, isBlocking: true, slaHours: 168, module: ChecklistModule.FOOD, competencyCode: "SANITATION_HACCP" },
 
   { order: 130, title: "Стандарти обслуговування", responsibleRole: Role.CURATOR, actionType: ActionType.MARK, isBlocking: true, slaHours: 168, module: ChecklistModule.RETAIL },
   { order: 131, title: "Робота з ваговим товаром", responsibleRole: Role.CURATOR, actionType: ActionType.MARK, isBlocking: true, slaHours: 168, module: ChecklistModule.RETAIL },
   { order: 132, title: "Викладка й планограми", responsibleRole: Role.CURATOR, actionType: ActionType.MARK, isBlocking: false, slaHours: 168, module: ChecklistModule.RETAIL },
   { order: 133, title: "Робота з термінами придатності", responsibleRole: Role.CURATOR, actionType: ActionType.MARK, isBlocking: true, slaHours: 168, module: ChecklistModule.RETAIL },
-  { order: 134, title: "Тест «Стандарти»", responsibleRole: Role.EMPLOYEE, actionType: ActionType.TEST, isBlocking: true, slaHours: 168, module: ChecklistModule.RETAIL },
+  { order: 134, title: "Тест «Стандарти»", responsibleRole: Role.EMPLOYEE, actionType: ActionType.TEST, isBlocking: true, slaHours: 168, module: ChecklistModule.RETAIL, competencyCode: "SERVICE_STANDARDS" },
 
   { order: 140, title: "Правила приймання товару", responsibleRole: Role.STORE_ADMIN, actionType: ActionType.MARK, isBlocking: true, slaHours: 72, module: ChecklistModule.WAREHOUSE },
   { order: 141, title: "Робота зі складською технікою", responsibleRole: Role.CURATOR, actionType: ActionType.MARK, isBlocking: true, slaHours: 72, module: ChecklistModule.WAREHOUSE },
@@ -739,6 +740,9 @@ async function seedOnboardingTemplate() {
   });
 
   for (const item of [...baseChecklistItems, ...moduleChecklistItems]) {
+    const competency = item.competencyCode
+      ? await prisma.competency.findUniqueOrThrow({ where: { code: item.competencyCode } })
+      : null;
     await prisma.checklistItemTemplate.create({
       data: {
         templateId: template.id,
@@ -749,6 +753,7 @@ async function seedOnboardingTemplate() {
         isBlocking: item.isBlocking,
         slaHours: item.slaHours,
         module: item.module,
+        competencyId: competency?.id,
       },
     });
   }

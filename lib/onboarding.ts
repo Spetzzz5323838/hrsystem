@@ -2,6 +2,7 @@ import { prisma } from "./prisma";
 import { hasAccess } from "./access";
 import { logAudit } from "./audit";
 import { sendTelegramMessage } from "./telegram";
+import { getCompetencyDelta } from "./competencies";
 import {
   Role,
   ActionType,
@@ -9,7 +10,14 @@ import {
   ProcessState,
   ProcessType,
   EmploymentStatus,
+  CompetencySource,
 } from "../generated/prisma/client";
+
+function addMonths(date: Date, months: number): Date {
+  const result = new Date(date);
+  result.setMonth(result.getMonth() + months);
+  return result;
+}
 
 /**
  * Резолвінг виконавця за роллю й областю: хто зараз має цю роль
@@ -200,11 +208,34 @@ export async function getInstanceTasks(instanceId: number): Promise<TaskView[]> 
   });
 }
 
-/** Позначає задачу виконаною — тільки якщо вона не заблокована й ще не DONE. */
-export async function completeTask(taskId: number, completedByEmploymentId: number): Promise<{ ok: true } | { ok: false; error: string }> {
+/**
+ * Позначає задачу виконаною — тільки якщо вона не заблокована й ще не DONE.
+ *
+ * Механізм атестації (звужений обсяг — docs catalogs-v1.1 §7 описує повний
+ * конструктор із відсотковими розділами й провалом/повторними спробами,
+ * тут лише запис результату):
+ * - пункт actionType=TEST із прив'язаною компетенцією (`itemTemplate.competencyId`)
+ *   вимагає `input.score` і пише CompetencyRecord(source=TEST) для неї;
+ * - пункт із назвою, що починається на "Атестація" (і онбординг, і
+ *   "Атестація за новим профілем" при переведенні — обидва йдуть через
+ *   цю саму функцію), при виконанні закриває решту дельти профілю
+ *   CompetencyRecord(source=ATTESTATION) — усе, що ще не valid.
+ */
+export async function completeTask(
+  taskId: number,
+  completedByEmploymentId: number,
+  input?: { score?: number },
+): Promise<{ ok: true } | { ok: false; error: string }> {
   const task = await prisma.task.findUnique({
     where: { id: taskId },
-    include: { itemTemplate: true, instance: true },
+    include: {
+      itemTemplate: true,
+      instance: {
+        include: {
+          employment: { include: { staffUnit: { include: { positionProfile: true } } } },
+        },
+      },
+    },
   });
   if (!task) return { ok: false, error: "Задачу не знайдено" };
   if (task.status === TaskStatus.DONE) return { ok: false, error: "Уже виконано" };
@@ -213,10 +244,61 @@ export async function completeTask(taskId: number, completedByEmploymentId: numb
   const thisView = tasksInInstance.find((t) => t.taskId === taskId);
   if (thisView?.blocked) return { ok: false, error: "Заблоковано попереднім пунктом" };
 
+  const employment = task.instance.employment;
+  const now = new Date();
+
+  if (task.itemTemplate.actionType === ActionType.TEST && task.itemTemplate.competencyId) {
+    const score = input?.score;
+    if (score == null || !Number.isFinite(score) || score < 0 || score > 100) {
+      return { ok: false, error: "Потрібен бал складання (0-100)" };
+    }
+    const competency = await prisma.competency.findUniqueOrThrow({ where: { id: task.itemTemplate.competencyId } });
+    await prisma.competencyRecord.create({
+      data: {
+        personId: employment.personId,
+        competencyId: competency.id,
+        passedAt: now,
+        score,
+        validUntil: competency.validMonths ? addMonths(now, competency.validMonths) : null,
+        source: CompetencySource.TEST,
+      },
+    });
+  }
+
   await prisma.task.update({
     where: { id: taskId },
-    data: { status: TaskStatus.DONE, completedAt: new Date(), completedById: completedByEmploymentId },
+    data: { status: TaskStatus.DONE, completedAt: now, completedById: completedByEmploymentId },
   });
+
+  if (task.itemTemplate.title.startsWith("Атестація")) {
+    const delta = await getCompetencyDelta(employment.personId, employment.staffUnit.positionProfileId);
+    for (const row of delta) {
+      if (row.state === "valid") continue;
+      await prisma.competencyRecord.create({
+        data: {
+          personId: employment.personId,
+          competencyId: row.competencyId,
+          passedAt: now,
+          validUntil: row.validMonths ? addMonths(now, row.validMonths) : null,
+          source: CompetencySource.ATTESTATION,
+        },
+      });
+    }
+
+    // Докс plan-v1.md §8, п.10: "Атестацію складено → статус ACTIVE". Лише
+    // для онбордингу — "Атестація за новим профілем" при переведенні йде
+    // за власним переходом у lib/transfer.ts (гейтиться рештою пунктів
+    // переведення: обладнання тощо), тут його випереджати не можна.
+    if (task.itemTemplate.title === "Атестація") {
+      await prisma.employment.update({ where: { id: employment.id }, data: { status: EmploymentStatus.ACTIVE } });
+      await logAudit({
+        actorId: completedByEmploymentId,
+        action: "onboarding.activated",
+        entityType: "Employment",
+        entityId: employment.id,
+      });
+    }
+  }
 
   // Тільки блокуючі пункти гейтять закриття інстансу — неблокуючі
   // (напр. "Знайомство з колективом") можуть лишитись відкритими.
@@ -226,7 +308,7 @@ export async function completeTask(taskId: number, completedByEmploymentId: numb
   if (remaining === 0) {
     await prisma.processInstance.update({
       where: { id: task.instanceId },
-      data: { state: ProcessState.DONE, finishedAt: new Date() },
+      data: { state: ProcessState.DONE, finishedAt: now },
     });
   }
 

@@ -399,6 +399,7 @@ model Competency {
   positionCompetencies PositionCompetency[]
   records              CompetencyRecord[]
   materials            Material[]
+  checklistItemTemplates ChecklistItemTemplate[]
 }
 
 /// Що вимагає профіль посади.
@@ -481,6 +482,11 @@ model ChecklistItemTemplate {
   isBlocking      Boolean         @default(true)
   slaHours        Int?
   module          ChecklistModule?
+  /// Прив'язка для actionType=TEST — яку компетенцію підтверджує складання
+  /// (обмежений крок "механізм атестації": лише запис результату, без
+  /// відсоткових розділів і провалу/повторних спроб з docs catalogs-v1.1 §7).
+  competencyId    Int?
+  competency      Competency?      @relation(fields: [competencyId], references: [id])
 
   tasks Task[]
 

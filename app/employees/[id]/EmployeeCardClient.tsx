@@ -108,6 +108,7 @@ const AUDIT_ACTION_LABELS: Record<string, string> = {
   "termination.started": "Ініційовано звільнення",
   "termination.completed": "Звільнення завершено",
   "curator.assigned": "Призначено куратора",
+  "onboarding.activated": "Атестацію складено, статус ACTIVE",
 };
 
 function auditActionLabel(action: string): string {
@@ -330,6 +331,66 @@ function CuratorDialog({
             }`}
           >
             Призначити
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ScoreDialog({
+  title,
+  submitting,
+  error,
+  onClose,
+  onSubmit,
+}: {
+  title: string;
+  submitting: boolean;
+  error: string | null;
+  onClose: () => void;
+  onSubmit: (score: number) => void;
+}) {
+  const [score, setScore] = useState("");
+  const parsed = Number(score);
+  const valid = score !== "" && Number.isFinite(parsed) && parsed >= 0 && parsed <= 100;
+
+  return (
+    <div className="fixed inset-0 z-20 flex items-center justify-center bg-slate-900/40 px-4">
+      <div className="w-full max-w-sm rounded-md bg-white p-5">
+        <div className="flex items-start justify-between">
+          <h3 className="text-lg font-semibold text-slate-900">{title}</h3>
+          <button onClick={onClose}>
+            <X size={18} className="text-slate-400" />
+          </button>
+        </div>
+
+        <label className="mt-4 block">
+          <span className="text-sm text-slate-700">Бал складання (0–100)</span>
+          <input
+            type="number"
+            min={0}
+            max={100}
+            value={score}
+            onChange={(e) => setScore(e.target.value)}
+            className="mt-1 w-full rounded border border-slate-300 px-2 py-1.5 text-sm"
+          />
+        </label>
+
+        {error && <p className="mt-3 text-sm text-rose-700">{error}</p>}
+
+        <div className="mt-4 flex justify-end gap-2">
+          <button onClick={onClose} className="rounded border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-50">
+            Скасувати
+          </button>
+          <button
+            disabled={submitting || !valid}
+            onClick={() => onSubmit(parsed)}
+            className={`rounded px-3 py-1.5 text-sm font-medium text-white ${
+              submitting || !valid ? "cursor-not-allowed bg-slate-300" : "bg-slate-800 hover:bg-slate-700"
+            }`}
+          >
+            Зберегти
           </button>
         </div>
       </div>
@@ -664,6 +725,10 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
   const [curatorError, setCuratorError] = useState<string | null>(null);
   const [curatorSubmitting, setCuratorSubmitting] = useState(false);
 
+  const [scoreDialogTaskId, setScoreDialogTaskId] = useState<number | null>(null);
+  const [scoreError, setScoreError] = useState<string | null>(null);
+  const [scoreSubmitting, setScoreSubmitting] = useState(false);
+
   const completeTask = (taskId: number) => {
     const task = onboarding?.tasks.find((t) => t.taskId === taskId);
     if (task?.title === "Призначення куратора") {
@@ -673,6 +738,11 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
         .then((r) => (r.ok ? r.json() : []))
         .then(setCuratorCandidates)
         .catch(() => setCuratorCandidates([]));
+      return;
+    }
+    if (task?.actionType === "TEST") {
+      setScoreError(null);
+      setScoreDialogTaskId(taskId);
       return;
     }
 
@@ -685,6 +755,25 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
       })
       .catch((e) => setOnboardingError(e.message))
       .finally(() => setBusyTaskId(null));
+  };
+
+  const submitScore = (score: number) => {
+    if (!scoreDialogTaskId) return;
+    setScoreSubmitting(true);
+    fetch(`/api/tasks/${scoreDialogTaskId}/complete`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ score }),
+    })
+      .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
+      .then(({ ok, body }) => {
+        if (!ok) throw new Error(body.error ?? "Не вдалося зберегти результат");
+        setScoreDialogTaskId(null);
+        loadOnboarding();
+        loadDetail();
+      })
+      .catch((e) => setScoreError(e.message))
+      .finally(() => setScoreSubmitting(false));
   };
 
   const submitCurator = (curatorEmploymentId: number) => {
@@ -1182,6 +1271,15 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
                 error={curatorError}
                 onClose={() => setCuratorDialogTaskId(null)}
                 onSubmit={submitCurator}
+              />
+            )}
+            {scoreDialogTaskId && (
+              <ScoreDialog
+                title={onboarding?.tasks.find((t) => t.taskId === scoreDialogTaskId)?.title ?? "Результат тесту"}
+                submitting={scoreSubmitting}
+                error={scoreError}
+                onClose={() => setScoreDialogTaskId(null)}
+                onSubmit={submitScore}
               />
             )}
           </>
