@@ -1,9 +1,11 @@
 import { prisma } from "./prisma";
 import { EmploymentStatus } from "../generated/prisma/client";
+import { logAudit } from "./audit";
 
 export async function freezeEmployment(
   employmentId: number,
   input: { reasonCode: string; plannedReturnAt?: Date; vacatesPosition: boolean },
+  actorEmploymentId: number,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const employment = await prisma.employment.findUnique({ where: { id: employmentId } });
   if (!employment) return { ok: false, error: "Не знайдено" };
@@ -24,6 +26,15 @@ export async function freezeEmployment(
       freezeVacatesPosition: input.vacatesPosition,
     },
   });
+
+  await logAudit({
+    actorId: actorEmploymentId,
+    action: "employment.frozen",
+    entityType: "Employment",
+    entityId: employmentId,
+    diff: { reasonCode: input.reasonCode },
+  });
+
   return { ok: true };
 }
 
@@ -35,7 +46,7 @@ export type UnfreezeResult = { ok: true; extendedCompetencies: number; frozenDay
  * (docs v1.2 §3 — "інакше людина після декрету виходить із простроченим
  * профілем і мусить перескладати все").
  */
-export async function unfreezeEmployment(employmentId: number): Promise<UnfreezeResult> {
+export async function unfreezeEmployment(employmentId: number, actorEmploymentId: number): Promise<UnfreezeResult> {
   const employment = await prisma.employment.findUnique({ where: { id: employmentId } });
   if (!employment) return { ok: false, error: "Не знайдено" };
   if (employment.status !== EmploymentStatus.FROZEN || !employment.frozenSince) {
@@ -67,6 +78,14 @@ export async function unfreezeEmployment(employmentId: number): Promise<Unfreeze
       plannedReturnAt: null,
       freezeVacatesPosition: null,
     },
+  });
+
+  await logAudit({
+    actorId: actorEmploymentId,
+    action: "employment.unfrozen",
+    entityType: "Employment",
+    entityId: employmentId,
+    diff: { frozenDays },
   });
 
   return { ok: true, extendedCompetencies: records.length, frozenDays };

@@ -1,5 +1,6 @@
 import { prisma } from "./prisma";
 import { hasAccess } from "./access";
+import { logAudit } from "./audit";
 import {
   Role,
   ActionType,
@@ -230,6 +231,14 @@ export async function completeCuratorAssignmentTask(
   await prisma.employment.update({
     where: { id: task.instance.employmentId },
     data: { curatorId: curatorEmploymentId },
+  });
+
+  await logAudit({
+    actorId: completedByEmploymentId,
+    action: "curator.assigned",
+    entityType: "Employment",
+    entityId: task.instance.employmentId,
+    diff: { curatorEmploymentId },
   });
 
   await prisma.task.updateMany({

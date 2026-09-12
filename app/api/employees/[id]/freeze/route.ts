@@ -3,7 +3,7 @@ import { prisma } from "../../../../../lib/prisma";
 import { getSessionPerson } from "../../../../../lib/auth";
 import { can } from "../../../../../lib/permissions";
 import { freezeEmployment, unfreezeEmployment } from "../../../../../lib/freeze";
-import { Capability } from "../../../../../generated/prisma/client";
+import { Capability, EmploymentStatus } from "../../../../../generated/prisma/client";
 
 async function loadEmployment(employmentId: number) {
   return prisma.employment.findUnique({
@@ -38,7 +38,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     return NextResponse.json({ error: "Потрібна причина заморозки" }, { status: 400 });
   }
 
-  const result = await freezeEmployment(employmentId, { reasonCode, plannedReturnAt, vacatesPosition });
+  const actorEmployment = await prisma.employment.findFirst({
+    where: { personId: session.id, status: { not: EmploymentStatus.TERMINATED } },
+  });
+  if (!actorEmployment) return NextResponse.json({ error: "У вас немає активного працевлаштування" }, { status: 400 });
+
+  const result = await freezeEmployment(employmentId, { reasonCode, plannedReturnAt, vacatesPosition }, actorEmployment.id);
   if (!result.ok) return NextResponse.json({ error: result.error }, { status: 409 });
 
   return NextResponse.json({ ok: true });
@@ -61,7 +66,12 @@ export async function DELETE(_request: NextRequest, { params }: { params: Promis
   });
   if (!allowed) return NextResponse.json({ error: "Немає права розморожувати цього працівника" }, { status: 403 });
 
-  const result = await unfreezeEmployment(employmentId);
+  const actorEmployment = await prisma.employment.findFirst({
+    where: { personId: session.id, status: { not: EmploymentStatus.TERMINATED } },
+  });
+  if (!actorEmployment) return NextResponse.json({ error: "У вас немає активного працевлаштування" }, { status: 400 });
+
+  const result = await unfreezeEmployment(employmentId, actorEmployment.id);
   if (!result.ok) return NextResponse.json({ error: result.error }, { status: 409 });
 
   return NextResponse.json(result);

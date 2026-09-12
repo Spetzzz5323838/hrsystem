@@ -97,6 +97,21 @@ function fmtDateTime(iso: string | null): string {
   return new Date(iso).toLocaleString("uk-UA", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
+const AUDIT_ACTION_LABELS: Record<string, string> = {
+  "transfer.started": "Ініційовано переведення",
+  "transfer.staffUnitChanged": "Змінено штатну одиницю (переведення)",
+  "transfer.completed": "Переведення завершено",
+  "employment.frozen": "Заморожено",
+  "employment.unfrozen": "Розморожено",
+  "termination.started": "Ініційовано звільнення",
+  "termination.completed": "Звільнення завершено",
+  "curator.assigned": "Призначено куратора",
+};
+
+function auditActionLabel(action: string): string {
+  return AUDIT_ACTION_LABELS[action] ?? action;
+}
+
 type TaskRow = {
   taskId: number;
   order: number;
@@ -939,6 +954,25 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
       .catch((e) => setEquipmentError(e.message));
   };
 
+  const [history, setHistory] = useState<
+    { id: number; action: string; diff: unknown; actorName: string | null; createdAt: string }[] | null
+  >(null);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch(`/api/employees/${employmentId}/audit-log`)
+      .then((r) => {
+        if (!r.ok) throw new Error("Не вдалося завантажити історію");
+        return r.json();
+      })
+      .then((data) => {
+        setHistory(data.entries);
+        setHistoryError(null);
+      })
+      .catch((e) => setHistoryError(e.message));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [employmentId]);
+
   const [rating, setRating] = useState<RatingData | null>(null);
   const [ratingError, setRatingError] = useState<string | null>(null);
   const [categories, setCategories] = useState<RatingCategoryRow[]>([]);
@@ -1726,9 +1760,27 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
                 </tr>
               </tbody>
             </table>
-            <p className="border-t border-slate-200 px-4 py-2 text-xs text-slate-400">
-              Повний журнал змін (хто й коли змінив посаду, відділ, куратора) з&rsquo;явиться разом з AuditLog — окремий крок.
-            </p>
+            <div className="border-t border-slate-200 px-4 py-3">
+              <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-400">Журнал змін</h3>
+              {historyError && <p className="text-sm text-red-600">{historyError}</p>}
+              {!historyError && history === null && <p className="text-sm text-slate-500">Завантаження…</p>}
+              {!historyError && history !== null && history.length === 0 && (
+                <p className="text-sm text-slate-500">Ще немає жодного запису.</p>
+              )}
+              {!historyError && history !== null && history.length > 0 && (
+                <table className="w-full text-sm">
+                  <tbody className="divide-y divide-slate-100">
+                    {history.map((h) => (
+                      <tr key={h.id}>
+                        <td className="whitespace-nowrap px-2 py-2 text-slate-500">{fmtDateTime(h.createdAt)}</td>
+                        <td className="px-2 py-2 text-slate-900">{auditActionLabel(h.action)}</td>
+                        <td className="px-2 py-2 text-slate-500">{h.actorName ?? "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
           </Section>
         )}
       </div>

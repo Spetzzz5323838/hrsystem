@@ -291,6 +291,7 @@ model Employment {
   clearanceSheets      ClearanceSheet[]
   uploadedDocuments    Document[]
   responsibleEquipment Equipment[]
+  auditActions         AuditLog[]
 
   @@index([personId])
   @@index([staffUnitId])
@@ -633,6 +634,25 @@ model Document {
   expiresAt        DateTime?
 
   @@index([personId])
+}
+
+/// Журнал дій (docs plan-v1.md §4.3/§14). Перша ітерація покриває тільки
+/// зміни, для яких уже є API — переведення, заморозка, звільнення,
+/// куратор. Права й оргструктура поки без власного API редагування
+/// (тільки seed), тому логувати їхні зміни нема звідки — окремий крок,
+/// коли з'явиться UI редагування.
+model AuditLog {
+  id         Int         @id @default(autoincrement())
+  actorId    Int?
+  actor      Employment? @relation(fields: [actorId], references: [id])
+  action     String
+  entityType String
+  entityId   Int?
+  diff       Json?
+  createdAt  DateTime    @default(now())
+
+  @@index([entityType, entityId])
+  @@index([actorId])
 }
 
 /// Обладнання, закріплене за працівником (docs plan-v1.md §11).

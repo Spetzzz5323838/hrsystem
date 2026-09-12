@@ -1,6 +1,7 @@
 import { prisma } from "./prisma";
 import { getCompetencyDelta } from "./competencies";
 import { resolveAssignee, completeTask as completeGenericTask } from "./onboarding";
+import { logAudit } from "./audit";
 import { EmploymentStatus, ProcessState, ProcessType, TaskStatus, OrgNodeType, Role } from "../generated/prisma/client";
 
 /** Погоджувач переведення = керівник найближчого спільного вузла рівня
@@ -118,6 +119,14 @@ export async function startTransfer(
     });
   }
 
+  await logAudit({
+    actorId: initiatorEmploymentId,
+    action: "transfer.started",
+    entityType: "Employment",
+    entityId: employmentId,
+    diff: { fromStaffUnitId: employment.staffUnitId, toStaffUnitId: targetStaffUnitId },
+  });
+
   return { ok: true, instanceId: instance.id };
 }
 
@@ -147,9 +156,20 @@ export async function completeTransferTask(
     });
     const payload = initTask?.payload as { targetStaffUnitId?: number } | null;
     if (payload?.targetStaffUnitId) {
+      const before = await prisma.employment.findUniqueOrThrow({
+        where: { id: task.instance.employmentId },
+        select: { staffUnitId: true },
+      });
       await prisma.employment.update({
         where: { id: task.instance.employmentId },
         data: { staffUnitId: payload.targetStaffUnitId },
+      });
+      await logAudit({
+        actorId: completedByEmploymentId,
+        action: "transfer.staffUnitChanged",
+        entityType: "Employment",
+        entityId: task.instance.employmentId,
+        diff: { from: before.staffUnitId, to: payload.targetStaffUnitId },
       });
     }
   }
@@ -161,6 +181,12 @@ export async function completeTransferTask(
   });
   if (remaining === 0) {
     await prisma.employment.update({ where: { id: task.instance.employmentId }, data: { status: EmploymentStatus.ACTIVE } });
+    await logAudit({
+      actorId: completedByEmploymentId,
+      action: "transfer.completed",
+      entityType: "Employment",
+      entityId: task.instance.employmentId,
+    });
   }
 
   return { ok: true };

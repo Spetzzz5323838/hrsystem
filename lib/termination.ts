@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { prisma } from "./prisma";
 import { resolveAssignee, completeTask as completeGenericTask, getInstanceTasks } from "./onboarding";
+import { logAudit } from "./audit";
 import { EmploymentStatus, ProcessState, ProcessType, TaskStatus } from "../generated/prisma/client";
 
 export async function startTermination(
@@ -79,6 +80,14 @@ export async function startTermination(
     });
   }
 
+  await logAudit({
+    actorId: initiatorEmploymentId,
+    action: "termination.started",
+    entityType: "Employment",
+    entityId: employmentId,
+    diff: { reasonCode: input.reasonCode, lastWorkingDay: input.lastWorkingDay },
+  });
+
   return { ok: true, instanceId: instance.id };
 }
 
@@ -119,6 +128,12 @@ export async function completeTerminationTask(
     await prisma.employment.update({
       where: { id: task.instance.employmentId },
       data: { status: EmploymentStatus.TERMINATED, terminatedAt: new Date() },
+    });
+    await logAudit({
+      actorId: completedByEmploymentId,
+      action: "termination.completed",
+      entityType: "Employment",
+      entityId: task.instance.employmentId,
     });
   }
 
