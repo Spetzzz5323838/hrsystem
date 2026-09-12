@@ -219,10 +219,27 @@ export async function generateClearanceSheet(instanceId: number, generatedByEmpl
     include: { person: true },
   });
 
-  const equipment = await prisma.equipment.findMany({
-    where: { responsibleId: instance.employmentId },
-    orderBy: { inventoryNo: "asc" },
-  });
+  // Обладнання для листа — не лише поточний стан (Equipment.responsibleId),
+  // а й те, що вже квитовано в межах САМЕ ЦЬОГО процесу звільнення: інакше
+  // пункт зникає зі списку одразу, як тільки ревізор його зніме, і в PDF
+  // виглядає так, наче обладнання взагалі не було.
+  const [stillAssigned, clearedEvents] = await Promise.all([
+    prisma.equipment.findMany({ where: { responsibleId: instance.employmentId }, orderBy: { inventoryNo: "asc" } }),
+    prisma.equipmentEvent.findMany({
+      where: { processInstanceId: instanceId, type: "CLEARED" },
+      include: { equipment: true, performedBy: { include: { person: true } } },
+      orderBy: { occurredAt: "asc" },
+    }),
+  ]);
+
+  const equipment = [
+    ...clearedEvents.map((ev) => ({
+      inventoryNo: ev.equipment.inventoryNo,
+      name: ev.equipment.name,
+      statusStr: `квитовано ${fmtDateTime(ev.occurredAt)} (${ev.performedBy.person.fullName})`,
+    })),
+    ...stillAssigned.map((eq) => ({ inventoryNo: eq.inventoryNo, name: eq.name, statusStr: "ще не квитовано" })),
+  ];
 
   const initiatorTask = tasks.find((t) => t.itemTemplate.order === 1);
   const generatedAt = new Date();
@@ -257,7 +274,7 @@ export async function generateClearanceSheet(instanceId: number, generatedByEmpl
       whenStr: fmtDateTime(t.completedAt),
       comment: t.comment ?? "",
     })),
-    equipment: equipment.map((e) => ({ inventoryNo: e.inventoryNo, name: e.name })),
+    equipment,
     unresolvedItems,
     generatedByName: generatedBy.person.fullName,
     generatedAtStr: fmtDateTime(generatedAt),

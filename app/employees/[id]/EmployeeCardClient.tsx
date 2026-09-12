@@ -1213,6 +1213,9 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
 
   // ── Обладнання ──
   const [equipment, setEquipment] = useState<{ id: number; inventoryNo: string; name: string; assignedAt: string | null }[] | null>(null);
+  const [equipmentHistory, setEquipmentHistory] = useState<
+    { id: number; type: "ASSIGNED" | "CLEARED"; inventoryNo: string; name: string; performedByName: string; occurredAt: string }[] | null
+  >(null);
   const [newEquipmentInventoryNo, setNewEquipmentInventoryNo] = useState("");
   const [newEquipmentName, setNewEquipmentName] = useState("");
   const [equipmentSubmitting, setEquipmentSubmitting] = useState(false);
@@ -1228,8 +1231,16 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
       .catch(() => {});
   };
 
+  const loadEquipmentHistory = () => {
+    fetch(`/api/employees/${employmentId}/equipment-history`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then(setEquipmentHistory)
+      .catch(() => {});
+  };
+
   useEffect(() => {
     loadEquipment();
+    loadEquipmentHistory();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [employmentId]);
 
@@ -1247,6 +1258,7 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
         setNewEquipmentName("");
         setEquipmentError(null);
         loadEquipment();
+        loadEquipmentHistory();
       })
       .catch((e) => setEquipmentError(e.message))
       .finally(() => setEquipmentSubmitting(false));
@@ -1258,6 +1270,7 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
       .then(({ ok, body }) => {
         if (!ok) throw new Error(body.error ?? "Не вдалося зняти обладнання");
         loadEquipment();
+        loadEquipmentHistory();
       })
       .catch((e) => setEquipmentError(e.message));
   };
@@ -2399,6 +2412,43 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
                       <tr>
                         <td colSpan={3} className="px-4 py-8 text-center text-sm text-slate-500">
                           Обладнання не закріплене.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              )}
+            </Section>
+
+            <Section title="Історія обладнання">
+              {!equipmentHistory ? (
+                <div className="px-4 py-8 text-center text-sm text-slate-500">Завантаження…</div>
+              ) : (
+                <table className="w-full text-sm">
+                  <tbody className="divide-y divide-slate-100">
+                    {equipmentHistory.map((ev) => (
+                      <tr key={ev.id}>
+                        <td className="px-4 py-2.5 font-mono text-slate-500">{ev.inventoryNo}</td>
+                        <td className="px-4 py-2.5 text-slate-800">{ev.name}</td>
+                        <td className="px-4 py-2.5">
+                          <span
+                            className={`rounded px-1.5 py-0.5 text-xs border ${
+                              ev.type === "ASSIGNED"
+                                ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                : "bg-slate-100 text-slate-600 border-slate-200"
+                            }`}
+                          >
+                            {ev.type === "ASSIGNED" ? "закріплено" : "квитовано"}
+                          </span>
+                        </td>
+                        <td className="px-4 py-2.5 text-slate-500">{ev.performedByName}</td>
+                        <td className="px-4 py-2.5 text-right text-slate-500">{fmtDateTime(ev.occurredAt)}</td>
+                      </tr>
+                    ))}
+                    {!equipmentHistory.length && (
+                      <tr>
+                        <td colSpan={5} className="px-4 py-8 text-center text-sm text-slate-500">
+                          Подій ще не було.
                         </td>
                       </tr>
                     )}

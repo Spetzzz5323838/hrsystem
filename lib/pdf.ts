@@ -34,7 +34,7 @@ export type ClearanceSheetPdfData = {
   lastWorkingDayStr: string;
   initiatorName: string;
   tasks: ClearanceSheetTaskRow[];
-  equipment: { inventoryNo: string; name: string }[];
+  equipment: { inventoryNo: string; name: string; statusStr: string }[];
   unresolvedItems: string[];
   generatedByName: string;
   generatedAtStr: string;

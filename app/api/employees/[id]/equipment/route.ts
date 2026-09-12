@@ -3,7 +3,7 @@ import { prisma } from "../../../../../lib/prisma";
 import { getSessionPerson } from "../../../../../lib/auth";
 import { can } from "../../../../../lib/permissions";
 import { assignEquipment } from "../../../../../lib/equipment";
-import { Capability } from "../../../../../generated/prisma/client";
+import { Capability, EmploymentStatus } from "../../../../../generated/prisma/client";
 
 async function loadEmployment(employmentId: number) {
   return prisma.employment.findUnique({
@@ -61,11 +61,17 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     return NextResponse.json({ error: "Потрібні інвентарний номер і назва" }, { status: 400 });
   }
 
+  const actorEmployment = await prisma.employment.findFirst({
+    where: { personId: session.id, status: { not: EmploymentStatus.TERMINATED } },
+  });
+  if (!actorEmployment) return NextResponse.json({ error: "У вас немає активного працевлаштування" }, { status: 400 });
+
   const equipment = await assignEquipment({
     inventoryNo: inventoryNo.trim(),
     name: name.trim(),
     orgNodeId: employment.staffUnit.orgNode.id,
     responsibleId: employmentId,
+    performedById: actorEmployment.id,
   });
 
   return NextResponse.json({ id: equipment.id, inventoryNo: equipment.inventoryNo, name: equipment.name });

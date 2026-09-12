@@ -3,7 +3,7 @@ import { prisma } from "../../../../../lib/prisma";
 import { getSessionPerson } from "../../../../../lib/auth";
 import { can } from "../../../../../lib/permissions";
 import { clearEquipment } from "../../../../../lib/equipment";
-import { Capability } from "../../../../../generated/prisma/client";
+import { Capability, EmploymentStatus } from "../../../../../generated/prisma/client";
 
 export async function POST(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getSessionPerson();
@@ -21,6 +21,11 @@ export async function POST(_request: NextRequest, { params }: { params: Promise<
   });
   if (!allowed) return NextResponse.json({ error: "Немає права квитувати обладнання" }, { status: 403 });
 
-  await clearEquipment(equipmentId);
+  const actorEmployment = await prisma.employment.findFirst({
+    where: { personId: session.id, status: { not: EmploymentStatus.TERMINATED } },
+  });
+  if (!actorEmployment) return NextResponse.json({ error: "У вас немає активного працевлаштування" }, { status: 400 });
+
+  await clearEquipment(equipmentId, actorEmployment.id);
   return NextResponse.json({ ok: true });
 }
