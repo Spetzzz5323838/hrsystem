@@ -45,6 +45,9 @@ export default function StructurePage() {
   const [openIds, setOpenIds] = useState<Set<number>>(new Set());
   const [staffing, setStaffing] = useState<Staffing | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [qr, setQr] = useState<{ link: string; qrDataUrl: string } | null>(null);
+  const [qrError, setQrError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     fetch("/api/org-tree")
@@ -71,7 +74,29 @@ export default function StructurePage() {
       })
       .then(setStaffing)
       .catch((e) => setError(e.message));
+
+    setQr(null);
+    setQrError(null);
+    setCopied(false);
+    fetch(`/api/org-nodes/${selectedId}/qr`)
+      .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
+      .then(({ ok, body }) => {
+        if (!ok) throw new Error(body.error ?? "Не вдалося згенерувати QR");
+        setQr(body);
+      })
+      .catch((e) => setQrError(e.message));
   }, [selectedId]);
+
+  const copyLink = () => {
+    if (!qr) return;
+    navigator.clipboard
+      .writeText(qr.link)
+      .then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      })
+      .catch(() => {});
+  };
 
   const children = useMemo(() => {
     const map = new Map<number | null, OrgNode[]>();
@@ -206,6 +231,31 @@ export default function StructurePage() {
                       )}
                     </tbody>
                   </table>
+                </Section>
+                <Section title="QR-код реєстрації">
+                  {qrError && <p className="px-4 py-3 text-sm text-rose-700">{qrError}</p>}
+                  {!qrError && !qr && <p className="px-4 py-3 text-sm text-slate-500">Завантаження…</p>}
+                  {qr && (
+                    <div className="flex flex-wrap items-center gap-4 px-4 py-3">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={qr.qrDataUrl} alt="QR-код реєстрації" width={140} height={140} className="rounded border border-slate-200" />
+                      <div className="min-w-0 flex-1 space-y-1">
+                        <p className="text-sm text-slate-600">
+                          Новий працівник сканує цей код (або переходить за посиланням) і реєструється через Telegram-бот. Заявка
+                          з&rsquo;явиться в розділі «Нові заявки» на сторінці «Працівники».
+                        </p>
+                        <div className="flex items-center gap-2">
+                          <input readOnly value={qr.link} className="w-full max-w-md rounded border border-slate-300 bg-slate-50 px-2 py-1 text-xs text-slate-700" />
+                          <button
+                            onClick={copyLink}
+                            className="shrink-0 rounded border border-slate-300 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                          >
+                            {copied ? "Скопійовано" : "Копіювати"}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </Section>
               </>
             )}
