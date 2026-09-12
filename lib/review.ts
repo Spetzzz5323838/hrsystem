@@ -15,11 +15,11 @@ export const REVIEW_CRITERION_LABELS: Record<ReviewCriterion, string> = {
 
 /**
  * Ваги критеріїв для посади (docs v1.3 §4). Рядок відсутній для
- * критерію = вага за замовчуванням 1 (порівну з рештою) — окремого
- * редактора ваг поки нема, налаштовується напряму записом у
- * ReviewCriterionWeight.
+ * критерію = вага за замовчуванням 1 (порівну з рештою) — редактор у
+ * /catalog (`canManageTemplates`) пише в ReviewCriterionWeight через
+ * PATCH /api/position-profiles/[id]/review-weights.
  */
-async function getWeights(positionProfileId: number): Promise<Record<ReviewCriterion, number>> {
+export async function getWeights(positionProfileId: number): Promise<Record<ReviewCriterion, number>> {
   const rows = await prisma.reviewCriterionWeight.findMany({ where: { positionProfileId } });
   const byCriterion = new Map(rows.map((r) => [r.criterion, r.weight]));
   const weights = {} as Record<ReviewCriterion, number>;

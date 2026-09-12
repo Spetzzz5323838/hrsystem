@@ -48,6 +48,17 @@ type AttestationItemRow = { id: number; order: number; title: string; maxPoints:
 type AttestationSectionRow = { id: number; order: number; title: string; items: AttestationItemRow[] };
 type AttestationForm = { templateId: number; passThresholdPercent: number; maxScore: number; sections: AttestationSectionRow[] };
 
+// Дзеркалить lib/review.ts::REVIEW_CRITERION_LABELS — той файл тягне за
+// собою Prisma-клієнт, тому дублюємо тут, а не імпортуємо в клієнтський компонент.
+const REVIEW_CRITERION_LABELS: Record<string, string> = {
+  QUALITY: "Якість роботи",
+  RELIABILITY: "Надійність",
+  PACE: "Темп",
+  TEAM: "Команда",
+  CLIENT: "Клієнт",
+  INITIATIVE: "Ініціатива й розвиток",
+};
+
 function Section({ title, right, children }: { title: string; right?: React.ReactNode; children: React.ReactNode }) {
   return (
     <div className="border border-slate-200 bg-white rounded-md">
@@ -135,12 +146,42 @@ export default function CatalogPage() {
       .catch(() => setAttestationLoaded(true));
   };
 
+  const [reviewWeights, setReviewWeights] = useState<{ criterion: string; weight: number }[] | null>(null);
+  const [reviewWeightsError, setReviewWeightsError] = useState<string | null>(null);
+
+  const loadReviewWeights = () => {
+    if (selectedId == null) return;
+    fetch(`/api/position-profiles/${selectedId}/review-weights`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then(setReviewWeights)
+      .catch(() => setReviewWeights([]));
+  };
+
+  const updateReviewWeight = (criterion: string, weight: string) => {
+    if (selectedId == null) return;
+    const num = Number(weight);
+    fetch(`/api/position-profiles/${selectedId}/review-weights`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ criterion, weight: num }),
+    })
+      .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
+      .then(({ ok, body }) => {
+        if (!ok) throw new Error(body.error ?? "Не вдалося зберегти вагу");
+        setReviewWeightsError(null);
+        loadReviewWeights();
+      })
+      .catch((e) => setReviewWeightsError(e.message));
+  };
+
   useEffect(() => {
     setDetail(null);
     loadDetail();
     setAttestationForm(null);
     setAttestationLoaded(false);
     loadAttestationForm();
+    setReviewWeights(null);
+    loadReviewWeights();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId]);
 
@@ -740,6 +781,41 @@ export default function CatalogPage() {
                         )}
                       </div>
                     )}
+                  </Section>
+
+                  <Section title="Ваги критеріїв квартальної оцінки">
+                    {reviewWeightsError && <p className="px-4 pt-3 text-sm text-rose-700">{reviewWeightsError}</p>}
+                    {!reviewWeights ? (
+                      <div className="px-4 py-8 text-center text-sm text-slate-500">Завантаження…</div>
+                    ) : (
+                      <table className="w-full text-sm">
+                        <tbody className="divide-y divide-slate-100">
+                          {reviewWeights.map((w) => (
+                            <tr key={w.criterion}>
+                              <td className="px-4 py-2 text-slate-700">{REVIEW_CRITERION_LABELS[w.criterion] ?? w.criterion}</td>
+                              <td className="px-4 py-2 text-right">
+                                {canEditTemplates ? (
+                                  <input
+                                    key={w.criterion + w.weight}
+                                    type="number"
+                                    min={1}
+                                    max={10}
+                                    defaultValue={w.weight}
+                                    onBlur={(e) => updateReviewWeight(w.criterion, e.target.value)}
+                                    className="w-16 rounded border border-slate-300 px-2 py-1 text-right text-sm"
+                                  />
+                                ) : (
+                                  <span className="text-slate-600">{w.weight}</span>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                    <p className="px-4 pb-3 pt-1 text-xs text-slate-400">
+                      Без налаштування всі критерії важать порівну (вага 1). Вищий бал — більший вплив критерію на підсумкову оцінку.
+                    </p>
                   </Section>
                 </>
               )}
