@@ -240,6 +240,7 @@ const TABS = [
   ["comp", "Компетенції"],
   ["docs", "Документи"],
   ["rating", "Рейтинг"],
+  ["review", "Квартальна оцінка"],
   ["equip", "Обладнання"],
   ["hist", "Історія"],
 ] as const;
@@ -1328,6 +1329,81 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
       .finally(() => setBonusSubmitting(false));
   };
 
+  // ── Квартальна оцінка (docs v1.3 §4) ──
+  type ReviewCriterionRow = { code: string; label: string; score: number; weight: number };
+  type ReviewRow = {
+    id: number;
+    year: number;
+    quarter: number;
+    weightedScore: number;
+    createdByName: string;
+    createdAt: string;
+    conversationConfirmedAt: string | null;
+    conversationConfirmedByName: string | null;
+    employeeAcknowledgedAt: string | null;
+    scores: ReviewCriterionRow[];
+  };
+  const [reviewData, setReviewData] = useState<{ criteria: { code: string; label: string }[]; reviews: ReviewRow[] } | null>(null);
+  const [reviewError, setReviewError] = useState<string | null>(null);
+  const now = new Date();
+  const [reviewYear, setReviewYear] = useState(String(now.getFullYear()));
+  const [reviewQuarter, setReviewQuarter] = useState(String(Math.ceil((now.getMonth() + 1) / 3)));
+  const [reviewScores, setReviewScores] = useState<Record<string, string>>({});
+  const [reviewSubmitting, setReviewSubmitting] = useState(false);
+  const [reviewFormError, setReviewFormError] = useState<string | null>(null);
+  const [confirmingReviewId, setConfirmingReviewId] = useState<number | null>(null);
+
+  const loadReviews = () => {
+    fetch(`/api/employees/${employmentId}/reviews`)
+      .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
+      .then(({ ok, body }) => {
+        if (!ok) throw new Error(body.error ?? "Не вдалося завантажити квартальні оцінки");
+        setReviewData(body);
+        setReviewError(null);
+      })
+      .catch((e) => setReviewError(e.message));
+  };
+
+  useEffect(() => {
+    loadReviews();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [employmentId]);
+
+  const submitReview = () => {
+    if (!reviewData) return;
+    setReviewSubmitting(true);
+    fetch(`/api/employees/${employmentId}/reviews`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        year: Number(reviewYear),
+        quarter: Number(reviewQuarter),
+        scores: Object.fromEntries(reviewData.criteria.map((c) => [c.code, Number(reviewScores[c.code] ?? 3)])),
+      }),
+    })
+      .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
+      .then(({ ok, body }) => {
+        if (!ok) throw new Error(body.error ?? "Не вдалося зберегти оцінку");
+        setReviewFormError(null);
+        setReviewScores({});
+        loadReviews();
+      })
+      .catch((e) => setReviewFormError(e.message))
+      .finally(() => setReviewSubmitting(false));
+  };
+
+  const confirmReviewConversation = (reviewId: number) => {
+    setConfirmingReviewId(reviewId);
+    fetch(`/api/reviews/${reviewId}/confirm-conversation`, { method: "POST" })
+      .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
+      .then(({ ok, body }) => {
+        if (!ok) throw new Error(body.error ?? "Не вдалося підтвердити");
+        loadReviews();
+      })
+      .catch((e) => setReviewError(e.message))
+      .finally(() => setConfirmingReviewId(null));
+  };
+
   if (error) {
     return <div className="px-6 py-6 text-sm text-rose-700">{error}</div>;
   }
@@ -2046,6 +2122,133 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
                 }}
                 onSubmit={submitRating}
               />
+            )}
+          </div>
+        )}
+
+        {tab === "review" && (
+          <div className="space-y-4">
+            {reviewError && <p className="text-sm text-rose-700">{reviewError}</p>}
+            {!reviewData ? (
+              <div className="border border-dashed border-slate-300 bg-white rounded-md px-6 py-12 text-center text-sm text-slate-500">
+                Завантаження…
+              </div>
+            ) : (
+              <>
+                <Section title="Нова квартальна оцінка">
+                  <div className="space-y-3 px-4 py-3">
+                    <p className="text-xs text-slate-500">
+                      Оцінка не буде видима працівнику, доки ви не підтвердите, що бесіда з ним відбулася.
+                    </p>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <label className="flex items-center gap-1.5 text-sm text-slate-700">
+                        Рік
+                        <input
+                          type="number"
+                          value={reviewYear}
+                          onChange={(e) => setReviewYear(e.target.value)}
+                          className="w-24 rounded border border-slate-300 px-2 py-1 text-sm"
+                        />
+                      </label>
+                      <label className="flex items-center gap-1.5 text-sm text-slate-700">
+                        Квартал
+                        <select
+                          value={reviewQuarter}
+                          onChange={(e) => setReviewQuarter(e.target.value)}
+                          className="rounded border border-slate-300 px-2 py-1 text-sm"
+                        >
+                          {[1, 2, 3, 4].map((q) => (
+                            <option key={q} value={q}>
+                              Q{q}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      {reviewData.criteria.map((c) => (
+                        <label key={c.code} className="block">
+                          <span className="text-sm text-slate-700">{c.label}</span>
+                          <select
+                            value={reviewScores[c.code] ?? "3"}
+                            onChange={(e) => setReviewScores((prev) => ({ ...prev, [c.code]: e.target.value }))}
+                            className="mt-1 w-full rounded border border-slate-300 px-2 py-1.5 text-sm"
+                          >
+                            {[1, 2, 3, 4, 5].map((v) => (
+                              <option key={v} value={v}>
+                                {v}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      ))}
+                    </div>
+
+                    {reviewFormError && <p className="text-sm text-rose-700">{reviewFormError}</p>}
+
+                    <button
+                      onClick={submitReview}
+                      disabled={reviewSubmitting}
+                      className="rounded bg-slate-900 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+                    >
+                      Зберегти оцінку
+                    </button>
+                  </div>
+                </Section>
+
+                <Section title="Історія">
+                  <table className="w-full text-sm">
+                    <thead className="border-b border-slate-200 bg-slate-50 text-left text-xs text-slate-500">
+                      <tr>
+                        <th className="px-4 py-2 font-medium">Квартал</th>
+                        <th className="px-4 py-2 font-medium">Бал</th>
+                        <th className="px-4 py-2 font-medium">Автор</th>
+                        <th className="px-4 py-2 font-medium">Статус</th>
+                        <th className="px-4 py-2 font-medium text-right" />
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {reviewData.reviews.map((r) => (
+                        <tr key={r.id}>
+                          <td className="px-4 py-2 text-slate-800">
+                            Q{r.quarter} {r.year}
+                          </td>
+                          <td className="px-4 py-2 tabular-nums text-slate-700">{r.weightedScore.toFixed(1)} / 5</td>
+                          <td className="px-4 py-2 text-slate-600">{r.createdByName}</td>
+                          <td className="px-4 py-2 text-xs">
+                            {r.conversationConfirmedAt ? (
+                              <span className="text-emerald-700">
+                                опубліковано{r.employeeAcknowledgedAt ? " · ознайомлений(-а)" : " · очікує ознайомлення"}
+                              </span>
+                            ) : (
+                              <span className="text-amber-700">чекає бесіди</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-2 text-right">
+                            {!r.conversationConfirmedAt && (
+                              <button
+                                disabled={confirmingReviewId === r.id}
+                                onClick={() => confirmReviewConversation(r.id)}
+                                className="rounded border border-slate-300 px-2 py-1 text-xs font-medium hover:bg-slate-50 disabled:opacity-50"
+                              >
+                                Бесіда відбулася
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                      {!reviewData.reviews.length && (
+                        <tr>
+                          <td colSpan={5} className="px-4 py-8 text-center text-sm text-slate-500">
+                            Ще немає жодної квартальної оцінки.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </Section>
+              </>
             )}
           </div>
         )}

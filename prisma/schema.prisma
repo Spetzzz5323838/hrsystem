@@ -162,6 +162,16 @@ enum Visibility {
   PUBLIC
 }
 
+/// Шість фіксованих критеріїв квартальної оцінки (docs v1.3 §4).
+enum ReviewCriterion {
+  QUALITY
+  RELIABILITY
+  PACE
+  TEAM
+  CLIENT
+  INITIATIVE
+}
+
 /// Дерево організації: компанія -> напрям/кластер -> об'єкт -> відділ.
 /// path — матеріалізований шлях виду "1.3.14", перевірка доступу зводиться
 /// до target.path.startsWith(scope.path).
@@ -317,6 +327,9 @@ model Employment {
   auditActions         AuditLog[]
   attestationAttempts  AttestationAttempt[]
   gradedAttestations   AttestationAttempt[] @relation("AttestationGradedBy")
+  reviews              Review[]
+  confirmedReviews     Review[] @relation("ReviewConfirmedBy")
+  createdReviews       Review[] @relation("ReviewCreatedBy")
 
   @@index([personId])
   @@index([staffUnitId])
@@ -341,6 +354,7 @@ model PositionProfile {
   permissionGrants     PermissionGrant[]
   positionCompetencies PositionCompetency[]
   attestationTemplate  AttestationTemplate?
+  reviewCriterionWeights ReviewCriterionWeight[]
 }
 
 /// Штатна одиниця — посада, розставлена в конкретний вузол дерева.
@@ -670,6 +684,61 @@ model BadgeAward {
   comment     String?
 
   @@index([personId])
+}
+
+/// Вага критерію для посади (docs v1.3 §4: "у касира вища вага
+/// обслуговування, у пекаря — якості й санітарії"). Відсутній рядок для
+/// критерію = вага за замовчуванням (порівну з рештою) — окремого
+/// редактора ваг поки нема, налаштовується напряму через API.
+model ReviewCriterionWeight {
+  id                Int             @id @default(autoincrement())
+  positionProfileId Int
+  positionProfile   PositionProfile @relation(fields: [positionProfileId], references: [id])
+  criterion         ReviewCriterion
+  weight            Int
+
+  @@unique([positionProfileId, criterion])
+}
+
+/// Квартальна оцінка (docs v1.3 §4). weightedScore — знімок на момент
+/// створення (як і AttestationAttempt): подальша зміна ваг критеріїв не
+/// переписує вже виставлені оцінки. Не публікується працівнику, доки
+/// conversationConfirmedAt не проставлений — саме це поле є "воротами"
+/// видимості (docs: "результат не публікується, доки керівник не
+/// зафіксував, що бесіда відбулася"). employeeAcknowledgedAt — окреме
+/// підтвердження ознайомлення через кнопку в Telegram, для звітності.
+model Review {
+  id           Int        @id @default(autoincrement())
+  employmentId Int
+  employment   Employment @relation(fields: [employmentId], references: [id])
+  year         Int
+  quarter      Int
+  weightedScore Float
+
+  conversationConfirmedAt   DateTime?
+  conversationConfirmedById Int?
+  conversationConfirmedBy   Employment? @relation("ReviewConfirmedBy", fields: [conversationConfirmedById], references: [id])
+  employeeAcknowledgedAt    DateTime?
+
+  createdById Int
+  createdBy   Employment @relation("ReviewCreatedBy", fields: [createdById], references: [id])
+  createdAt   DateTime   @default(now())
+
+  scores ReviewScore[]
+
+  @@unique([employmentId, year, quarter])
+  @@index([employmentId])
+}
+
+model ReviewScore {
+  id        Int             @id @default(autoincrement())
+  reviewId  Int
+  review    Review          @relation(fields: [reviewId], references: [id])
+  criterion ReviewCriterion
+  score     Int
+  weight    Int
+
+  @@unique([reviewId, criterion])
 }
 
 /// Довідник причин заморозки (docs v1.2 §3) — редагується.

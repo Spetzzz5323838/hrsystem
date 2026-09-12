@@ -5,6 +5,7 @@ import { queueTelegramMessage, registerTelegramMessageWorker } from "../lib/noti
 import { getBoss } from "../lib/queue";
 import { checkSlaEscalations } from "../lib/sla";
 import { runPeriodicBadgeChecks } from "../lib/badges-periodic";
+import { acknowledgeReview } from "../lib/review";
 import { Prisma, Role } from "../generated/prisma/client";
 
 const token = process.env.TELEGRAM_BOT_TOKEN;
@@ -261,6 +262,26 @@ bot.on("message:contact", async (ctx) => {
   } finally {
     registrations.delete(ctx.from.id);
   }
+});
+
+// ── Квартальна оцінка (docs v1.3 §4): підтвердження ознайомлення. ──
+// Кнопка з'являється в повідомленні лише ПІСЛЯ того, як керівник
+// зафіксував, що бесіда відбулася (lib/review.ts::confirmConversation) —
+// тобто до цього моменту показувати нема чого.
+bot.callbackQuery(/^review_ack:(\d+)$/, async (ctx) => {
+  const reviewId = Number(ctx.match[1]);
+  const result = await acknowledgeReview(reviewId, BigInt(ctx.from.id));
+
+  if (!result.ok) {
+    await ctx.answerCallbackQuery({ text: result.error, show_alert: true });
+    return;
+  }
+
+  await ctx.answerCallbackQuery({ text: "Дякуємо, підтверджено!" });
+  await ctx.editMessageReplyMarkup(undefined).catch(() => {});
+
+  const lines = result.summary.map((r) => `Q${r.quarter} ${r.year}: ${r.weightedScore.toFixed(1)} / 5`);
+  await ctx.reply(`Ваша динаміка по кварталах:\n\n${lines.join("\n")}`);
 });
 
 bot.catch((err) => {
