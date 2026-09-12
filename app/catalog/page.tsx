@@ -390,6 +390,36 @@ export default function CatalogPage() {
       .catch((e) => setAttestationError(e.message));
   };
 
+  const renameSection = (sectionId: number, title: string) => {
+    if (!title.trim()) return;
+    fetch(`/api/attestation-sections/${sectionId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: title.trim() }),
+    })
+      .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
+      .then(({ ok, body }) => {
+        if (!ok) throw new Error(body.error ?? "Не вдалося перейменувати розділ");
+        loadAttestationForm();
+      })
+      .catch((e) => setAttestationError(e.message));
+  };
+
+  const renameItem = (itemId: number, title: string) => {
+    if (!title.trim()) return;
+    fetch(`/api/attestation-items/${itemId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: title.trim() }),
+    })
+      .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
+      .then(({ ok, body }) => {
+        if (!ok) throw new Error(body.error ?? "Не вдалося перейменувати пункт");
+        loadAttestationForm();
+      })
+      .catch((e) => setAttestationError(e.message));
+  };
+
   const deleteSection = (sectionId: number) => {
     if (!confirm("Видалити розділ і всі його пункти?")) return;
     fetch(`/api/attestation-sections/${sectionId}`, { method: "DELETE" })
@@ -625,11 +655,19 @@ export default function CatalogPage() {
                           return (
                             <div key={section.id} className="rounded border border-slate-200">
                               <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-3 py-1.5">
-                                <span className="text-sm font-medium text-slate-800">
-                                  {section.title} <span className="text-slate-400">({sectionMax})</span>
-                                </span>
+                                {canEditTemplates ? (
+                                  <input
+                                    key={section.id + section.title}
+                                    defaultValue={section.title}
+                                    onBlur={(e) => renameSection(section.id, e.target.value)}
+                                    className="flex-1 rounded border border-transparent bg-transparent px-1 py-0.5 text-sm font-medium text-slate-800 hover:border-slate-300 focus:border-slate-400 focus:bg-white"
+                                  />
+                                ) : (
+                                  <span className="text-sm font-medium text-slate-800">{section.title}</span>
+                                )}
+                                <span className="text-slate-400 text-sm">({sectionMax})</span>
                                 {canEditTemplates && (
-                                  <button onClick={() => deleteSection(section.id)} className="text-xs text-rose-600 hover:text-rose-800">
+                                  <button onClick={() => deleteSection(section.id)} className="ml-2 text-xs text-rose-600 hover:text-rose-800">
                                     видалити розділ
                                   </button>
                                 )}
@@ -637,7 +675,16 @@ export default function CatalogPage() {
                               <ul className="divide-y divide-slate-100">
                                 {section.items.map((item) => (
                                   <li key={item.id} className="flex items-center justify-between px-3 py-1.5 text-sm">
-                                    <span className="text-slate-700">{item.title}</span>
+                                    {canEditTemplates ? (
+                                      <input
+                                        key={item.id + item.title}
+                                        defaultValue={item.title}
+                                        onBlur={(e) => renameItem(item.id, e.target.value)}
+                                        className="flex-1 rounded border border-transparent bg-transparent px-1 py-0.5 text-slate-700 hover:border-slate-300 focus:border-slate-400 focus:bg-white"
+                                      />
+                                    ) : (
+                                      <span className="text-slate-700">{item.title}</span>
+                                    )}
                                     <span className="flex items-center gap-2">
                                       <span className="text-slate-400">макс {item.maxPoints}</span>
                                       {canEditTemplates && (
