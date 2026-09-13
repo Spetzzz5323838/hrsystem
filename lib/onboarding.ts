@@ -3,6 +3,7 @@ import { hasAccess } from "./access";
 import { logAudit } from "./audit";
 import { queueTelegramMessage } from "./notifications";
 import { getCompetencyDelta } from "./competencies";
+import { hashPassword, generateCabinetPassword } from "./auth";
 import { checkProfileClosedBadge, checkBeyondProfileBadge, checkFastStartBadge, checkMentorBadge } from "./rating";
 import {
   Role,
@@ -340,10 +341,19 @@ export async function completeTask(
     await prisma.employment.update({ where: { id: employment.id }, data: { status: EmploymentStatus.DOCUMENTS_PENDING } });
     await logAudit({ actorId: completedByEmploymentId, action: "onboarding.documentsPending", entityType: "Employment", entityId: employment.id });
 
+    // Пароль для веб-кабінету (docs: "Intranet-кабінет для персоналу") —
+    // видається саме тут, при активації, і йде тільки в бот (лінійний
+    // персонал інших каналів не має). Кожна активація видає новий пароль.
+    const cabinetPassword = generateCabinetPassword();
+    await prisma.person.update({ where: { id: employment.personId }, data: { passwordHash: await hashPassword(cabinetPassword) } });
+
     if (employment.person.telegramId) {
       await queueTelegramMessage(
         employment.person.telegramId,
-        "Ваш профіль активовано. Зверніться до оператора 1С і бухгалтерії для оформлення.",
+        "Ваш профіль активовано. Зверніться до оператора 1С і бухгалтерії для оформлення.\n\n" +
+          "Дані для входу в особистий кабінет (профіль, матеріали, прогрес навчання):\n" +
+          `Телефон: ${employment.person.phone}\n` +
+          `Пароль: ${cabinetPassword}`,
       );
     }
     const onecTask = await prisma.task.findFirst({

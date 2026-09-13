@@ -1,5 +1,5 @@
 import argon2 from "argon2";
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, randomInt } from "node:crypto";
 import { cookies } from "next/headers";
 import { prisma } from "./prisma";
 
@@ -8,6 +8,11 @@ const SESSION_TTL_MS = 12 * 60 * 60 * 1000; // 12 год — docs/hr-system-plan
 
 export async function hashPassword(password: string): Promise<string> {
   return argon2.hash(password, { type: argon2.argon2id });
+}
+
+/** Пароль для входу в кабінет, який працівник отримує через бота при активації — 8 цифр, легко ввести з телефону. */
+export function generateCabinetPassword(): string {
+  return randomInt(10_000_000, 100_000_000).toString();
 }
 
 export async function verifyPassword(hash: string, password: string): Promise<boolean> {

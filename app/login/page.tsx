@@ -23,8 +23,16 @@ export default function LoginPage() {
       .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
       .then(({ ok, body }) => {
         if (!ok) throw new Error(body.error ?? "Не вдалося увійти");
-        router.push("/employees");
-        router.refresh();
+        return fetch("/api/me")
+          .then((r) => (r.ok ? r.json() : null))
+          .then((me) => {
+            // Лінійний персонал (level 10/15 у seed) отримує лише SELF-скоуп
+            // VIEW_EMPLOYEE — жодного гранту з ширшою областю. Такий акаунт
+            // веде у власний кабінет, а не в адміністративний список.
+            const isLineStaff = !me || me.grants.every((g: { scope: string }) => g.scope === "SELF");
+            router.push(isLineStaff ? "/me" : "/employees");
+            router.refresh();
+          });
       })
       .catch((e) => setError(e.message))
       .finally(() => setSubmitting(false));
