@@ -119,9 +119,10 @@ bot.command("link", async (ctx) => {
   }
 
   linkRequests.add(ctx.from.id);
-  await ctx.reply("Щоб прив'язати Telegram до вашого акаунта в системі, поділіться номером телефону кнопкою нижче.", {
-    reply_markup: new Keyboard().requestContact("Поділитися номером телефону").resized().oneTime(),
-  });
+  await ctx.reply(
+    "Щоб прив'язати Telegram до вашого акаунта в системі, поділіться номером телефону.\n\nТоркніться поля вводу тексту внизу — з'явиться кнопка «Поділитися номером телефону».",
+    { reply_markup: new Keyboard().requestContact("Поділитися номером телефону").resized().oneTime() },
+  );
 });
 
 bot.on("message:text", async (ctx) => {
@@ -164,9 +165,10 @@ bot.on("message:text", async (ctx) => {
       state.email = null;
     }
     state.step = "phone";
-    await ctx.reply("Останній крок — поділіться номером телефону кнопкою нижче.", {
-      reply_markup: new Keyboard().requestContact("Поділитися номером телефону").resized().oneTime(),
-    });
+    await ctx.reply(
+      "Останній крок — поділіться номером телефону.\n\nТоркніться поля вводу тексту внизу — з'явиться кнопка «Поділитися номером телефону».",
+      { reply_markup: new Keyboard().requestContact("Поділитися номером телефону").resized().oneTime() },
+    );
     return;
   }
 });
