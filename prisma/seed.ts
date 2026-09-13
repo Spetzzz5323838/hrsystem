@@ -681,7 +681,11 @@ const baseChecklistItems: ChecklistItemSeed[] = [
   { order: 12, title: "Знайомство з колективом і робочим місцем", responsibleRole: Role.STORE_ADMIN, actionType: ActionType.MARK, isBlocking: false, slaHours: 48, module: null },
   { order: 13, title: "Ознайомлення з обов'язковими матеріалами", responsibleRole: Role.EMPLOYEE, actionType: ActionType.MARK, isBlocking: true, slaHours: 168, module: null },
   { order: 14, title: "Стажування під наглядом куратора", responsibleRole: Role.CURATOR, actionType: ActionType.MARK, isBlocking: true, slaHours: 336, module: null },
-  { order: 15, title: "Атестація", responsibleRole: Role.STORE_ADMIN, actionType: ActionType.APPROVAL, isBlocking: true, slaHours: 72, module: null },
+  // order 200, не 15: модульні пункти (order 100-182 нижче) мають бути пройдені
+  // ДО фінальної атестації, а не навпаки — послідовне блокування рахує єдиний
+  // ланцюжок по order через усі пункти інстансу, тож атестація має йти
+  // останньою в усьому чек-листі, а не одразу після базових 14 пунктів.
+  { order: 200, title: "Атестація", responsibleRole: Role.STORE_ADMIN, actionType: ActionType.APPROVAL, isBlocking: true, slaHours: 72, module: null },
 ];
 
 const moduleChecklistItems: ChecklistItemSeed[] = [
