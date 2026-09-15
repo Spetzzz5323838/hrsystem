@@ -69,6 +69,26 @@ export async function startTermination(
     },
   });
 
+  // docs plan-v1.md §4.4: "Блокування — при TERMINATION_STARTED — автоматичне
+  // зняття всіх RoleAssignment і активних сесій". RoleAssignment прив'язаний
+  // саме до цього employmentId (не до Person) — знімаються тільки ролі цього
+  // працевлаштування. Сесії прив'язані до Person, тож знімаються всі — на
+  // цьому масштабі одна людина не має двох одночасно ACTIVE employment.
+  const [revokedRoles, revokedSessions] = await Promise.all([
+    prisma.roleAssignment.deleteMany({ where: { employmentId } }),
+    prisma.session.deleteMany({ where: { personId: employment.personId } }),
+  ]);
+
+  if (revokedRoles.count > 0 || revokedSessions.count > 0) {
+    await logAudit({
+      actorId: initiatorEmploymentId,
+      action: "termination.accessRevoked",
+      entityType: "Employment",
+      entityId: employmentId,
+      diff: { revokedRoles: revokedRoles.count, revokedSessions: revokedSessions.count },
+    });
+  }
+
   const now = new Date();
   const targetPath = employment.staffUnit.orgNode.path;
 

@@ -777,8 +777,17 @@ function RateDialog({
   );
 }
 
+const TAB_KEYS = TABS.map(([key]) => key);
+
 export default function EmployeeCardClient({ employmentId }: { employmentId: string }) {
   const [tab, setTab] = useState<TabKey>("process");
+
+  // Дашборд "Мої задачі" (/) веде сюди з ?tab=... — читаємо лише на
+  // клієнті (не при SSR-рендері), щоб не чіпати window під час рендеру.
+  useEffect(() => {
+    const requestedTab = new URLSearchParams(window.location.search).get("tab");
+    if (TAB_KEYS.includes(requestedTab as TabKey)) setTab(requestedTab as TabKey);
+  }, []);
   const [detail, setDetail] = useState<Detail | null>(null);
   const [error, setError] = useState<string | null>(null);
 
