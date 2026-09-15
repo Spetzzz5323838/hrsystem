@@ -321,120 +321,158 @@ async function seedMaterials() {
   }
 }
 
-// Стартова матриця прав — docs/hr-transfers-competencies-v1.2.md... ні,
-// docs/hr-system-catalogs-v1.1.md §4.4 «Стартова матриця». Іду за таблицею
-// рядок за рядком: конкретні посади мають явний список, а нетиповані рівні
-// (10/15/20) — загальний кошик за замовчуванням.
-type GrantSeed = { capability: Capability; scope: ScopeType };
+// Права — докс/hr-system-catalogs-v1.1.md §4.4 «Стартова матриця», але не
+// напряму: замовник (2026-09-14) попросив розділити ДВІ осі — "що можна"
+// (профіль доступу, AccessProfile — просто набір можливостей) і "де саме"
+// (область, задається лише в момент призначення профілю посаді). Це усуває
+// дублювання, яке було в попередній версії матриці: OWN_OBJECT_FULL і
+// OWN_SUBTREE_FULL — буквально один і той самий список можливостей під
+// двома різними назвами лише через різну область.
+type AccessProfileSeed = { name: string; capabilities: Capability[] };
 
-const OWN_OBJECT_FULL: GrantSeed[] = [
-  { capability: Capability.VIEW_EMPLOYEE, scope: ScopeType.OWN_OBJECT },
-  { capability: Capability.EDIT_PROFILE, scope: ScopeType.OWN_OBJECT },
-  { capability: Capability.ACTIVATE_EMPLOYEE, scope: ScopeType.OWN_OBJECT },
-  { capability: Capability.ASSIGN_CURATOR, scope: ScopeType.OWN_OBJECT },
-  { capability: Capability.UPLOAD_DOCUMENTS, scope: ScopeType.OWN_OBJECT },
-  { capability: Capability.RUN_ATTESTATION, scope: ScopeType.OWN_OBJECT },
-  { capability: Capability.RATE_POSITIVE_NEGATIVE, scope: ScopeType.OWN_OBJECT },
-  { capability: Capability.ASSIGN_EQUIPMENT, scope: ScopeType.OWN_OBJECT },
-  { capability: Capability.INIT_TERMINATION, scope: ScopeType.OWN_OBJECT },
-  { capability: Capability.PRINT_CLEARANCE, scope: ScopeType.OWN_OBJECT },
-  { capability: Capability.MANAGE_MATERIALS, scope: ScopeType.OWN_OBJECT },
-  { capability: Capability.MANAGE_REMINDERS, scope: ScopeType.OWN_OBJECT },
-  // FREEZE/INIT_TRANSFER/APPROVE_TRANSFER немає в catalogs-v1.1 §4.4 (той
-  // документ — до v1.2 переведення/заморозки). Ініціює керівник, тому
-  // FREEZE й INIT_TRANSFER — тут; APPROVE_TRANSFER — тільки в директора
-  // кластера й вище (docs v1.2 §2.1).
-  { capability: Capability.FREEZE, scope: ScopeType.OWN_OBJECT },
-  { capability: Capability.INIT_TRANSFER, scope: ScopeType.OWN_OBJECT },
+const ACCESS_PROFILES: AccessProfileSeed[] = [
+  { name: "Перегляд власного профілю", capabilities: [Capability.VIEW_EMPLOYEE] },
+  { name: "Керівництво зміною", capabilities: [Capability.CLOSE_INTERNSHIP, Capability.RATE_POSITIVE_NEGATIVE] },
+  {
+    // = стара OWN_OBJECT_FULL/OWN_SUBTREE_FULL без FREEZE/INIT_TRANSFER/
+    // APPROVE_TRANSFER немає в catalogs-v1.1 §4.4 (той документ — до появи
+    // переведення й заморозки, v1.2). FREEZE/INIT_TRANSFER лишаю тут
+    // (ініціює керівник об'єкта чи вище); APPROVE_TRANSFER — окремим
+    // профілем нижче, він потрібен лише з рівня директора кластера.
+    name: "Повне управління персоналом",
+    capabilities: [
+      Capability.VIEW_EMPLOYEE,
+      Capability.EDIT_PROFILE,
+      Capability.ACTIVATE_EMPLOYEE,
+      Capability.ASSIGN_CURATOR,
+      Capability.UPLOAD_DOCUMENTS,
+      Capability.RUN_ATTESTATION,
+      Capability.RATE_POSITIVE_NEGATIVE,
+      Capability.ASSIGN_EQUIPMENT,
+      Capability.INIT_TERMINATION,
+      Capability.PRINT_CLEARANCE,
+      Capability.MANAGE_MATERIALS,
+      Capability.MANAGE_REMINDERS,
+      Capability.FREEZE,
+      Capability.INIT_TRANSFER,
+      // Відпустки (v1.2 §4) — прямий керівник об'єкта чи піддерева й погоджує
+      // звичайні заявки. Ескальовані (>14 днів/конфлікт/поза графіком) все
+      // одно перевіряються по області: canApproveVacation вимагає ширшу за
+      // OWN_OBJECT область для них — сам факт наявності APPROVE_VACATION тут
+      // ще не дає погоджувати ескальовані заявки об'єктному адміну.
+      Capability.APPROVE_VACATION,
+    ],
+  },
+  { name: "Аналітика", capabilities: [Capability.VIEW_ANALYTICS] },
+  { name: "Погодження переведення", capabilities: [Capability.APPROVE_TRANSFER] },
+  { name: "Перегляд і оцінка підлеглих", capabilities: [Capability.VIEW_EMPLOYEE, Capability.RATE_POSITIVE_NEGATIVE] },
+  {
+    name: "Бухгалтерія",
+    capabilities: [
+      Capability.VIEW_EMPLOYEE,
+      Capability.VIEW_DOCUMENTS,
+      Capability.UPLOAD_DOCUMENTS,
+      Capability.CLOSE_TERMINATION,
+      Capability.PRINT_CLEARANCE,
+      Capability.MANAGE_REMINDERS,
+    ],
+  },
+  { name: "Ревізія обладнання", capabilities: [Capability.VIEW_EMPLOYEE, Capability.CLEAR_EQUIPMENT, Capability.ASSIGN_EQUIPMENT] },
+  { name: "Адміністрування 1С", capabilities: [Capability.VIEW_EMPLOYEE, Capability.SET_1C_PASSWORD] },
+  {
+    name: "Адміністрування системи",
+    capabilities: [
+      Capability.MANAGE_TEMPLATES,
+      Capability.MANAGE_ORG_STRUCTURE,
+      Capability.MANAGE_MATERIALS,
+      Capability.MANAGE_PERMISSIONS,
+      Capability.VIEW_AUDIT_LOG,
+    ],
+  },
+  { name: "Повний доступ", capabilities: Object.values(Capability) },
 ];
 
-const OWN_SUBTREE_FULL: GrantSeed[] = [
-  ...OWN_OBJECT_FULL.map((g) => ({ capability: g.capability, scope: ScopeType.OWN_SUBTREE })),
-  { capability: Capability.VIEW_ANALYTICS, scope: ScopeType.OWN_SUBTREE },
-  { capability: Capability.APPROVE_TRANSFER, scope: ScopeType.OWN_SUBTREE },
-];
+type AssignmentSeed = { profileName: string; scope: ScopeType };
 
-const ACCOUNTANT_GRANTS: GrantSeed[] = [
-  { capability: Capability.VIEW_EMPLOYEE, scope: ScopeType.COMPANY },
-  { capability: Capability.VIEW_DOCUMENTS, scope: ScopeType.COMPANY },
-  { capability: Capability.UPLOAD_DOCUMENTS, scope: ScopeType.COMPANY },
-  { capability: Capability.CLOSE_TERMINATION, scope: ScopeType.COMPANY },
-  { capability: Capability.PRINT_CLEARANCE, scope: ScopeType.COMPANY },
-  { capability: Capability.MANAGE_REMINDERS, scope: ScopeType.COMPANY },
-];
-
-const ALL_CAPABILITIES_COMPANY: GrantSeed[] = Object.values(Capability).map((capability) => ({
-  capability,
-  scope: ScopeType.COMPANY,
-}));
-
-const explicitGrants: Record<string, GrantSeed[]> = {
-  "Адміністратор магазину": OWN_OBJECT_FULL,
-  "Завідуючий цехом": OWN_OBJECT_FULL,
-  "Директор кластера": OWN_SUBTREE_FULL,
-  "Категорійний менеджер": [
-    { capability: Capability.VIEW_EMPLOYEE, scope: ScopeType.SUBORDINATES },
-    { capability: Capability.RATE_POSITIVE_NEGATIVE, scope: ScopeType.SUBORDINATES },
-    { capability: Capability.VIEW_ANALYTICS, scope: ScopeType.COMPANY },
+const explicitAssignments: Record<string, AssignmentSeed[]> = {
+  "Адміністратор магазину": [{ profileName: "Повне управління персоналом", scope: ScopeType.OWN_OBJECT }],
+  "Завідуючий цехом": [{ profileName: "Повне управління персоналом", scope: ScopeType.OWN_OBJECT }],
+  "Директор кластера": [
+    { profileName: "Повне управління персоналом", scope: ScopeType.OWN_SUBTREE },
+    { profileName: "Аналітика", scope: ScopeType.OWN_SUBTREE },
+    { profileName: "Погодження переведення", scope: ScopeType.OWN_SUBTREE },
   ],
-  "Бухгалтер": ACCOUNTANT_GRANTS,
+  "Категорійний менеджер": [
+    { profileName: "Перегляд і оцінка підлеглих", scope: ScopeType.SUBORDINATES },
+    { profileName: "Аналітика", scope: ScopeType.COMPANY },
+  ],
+  "Бухгалтер": [{ profileName: "Бухгалтерія", scope: ScopeType.COMPANY }],
   // "Бухгалтер-касир" не названий у матриці окремо — даю ті самі права,
   // що й "Бухгалтер" (той самий systemRole ACCOUNTANT). Це моє припущення,
   // не буквальний рядок з докс.
-  "Бухгалтер-касир": ACCOUNTANT_GRANTS,
-  "Бухгалтер-ревізор": [
-    { capability: Capability.VIEW_EMPLOYEE, scope: ScopeType.COMPANY },
-    { capability: Capability.CLEAR_EQUIPMENT, scope: ScopeType.COMPANY },
-    { capability: Capability.ASSIGN_EQUIPMENT, scope: ScopeType.COMPANY },
-  ],
-  "Оператор 1С": [
-    { capability: Capability.VIEW_EMPLOYEE, scope: ScopeType.COMPANY },
-    { capability: Capability.SET_1C_PASSWORD, scope: ScopeType.COMPANY },
-  ],
-  "Системний адміністратор": [
-    { capability: Capability.MANAGE_TEMPLATES, scope: ScopeType.COMPANY },
-    { capability: Capability.MANAGE_ORG_STRUCTURE, scope: ScopeType.COMPANY },
-    { capability: Capability.MANAGE_MATERIALS, scope: ScopeType.COMPANY },
-    { capability: Capability.VIEW_AUDIT_LOG, scope: ScopeType.COMPANY },
-  ],
-  "Фінансовий директор": ALL_CAPABILITIES_COMPANY,
-  "Власник": ALL_CAPABILITIES_COMPANY,
+  "Бухгалтер-касир": [{ profileName: "Бухгалтерія", scope: ScopeType.COMPANY }],
+  "Бухгалтер-ревізор": [{ profileName: "Ревізія обладнання", scope: ScopeType.COMPANY }],
+  "Оператор 1С": [{ profileName: "Адміністрування 1С", scope: ScopeType.COMPANY }],
+  "Системний адміністратор": [{ profileName: "Адміністрування системи", scope: ScopeType.COMPANY }],
+  "Фінансовий директор": [{ profileName: "Повний доступ", scope: ScopeType.COMPANY }],
+  "Власник": [{ profileName: "Повний доступ", scope: ScopeType.COMPANY }],
 };
 
-const SHIFT_LEAD_GRANTS: GrantSeed[] = [
-  { capability: Capability.VIEW_EMPLOYEE, scope: ScopeType.OWN_DEPARTMENT },
-  { capability: Capability.CLOSE_INTERNSHIP, scope: ScopeType.SUBORDINATES },
-  { capability: Capability.RATE_POSITIVE_NEGATIVE, scope: ScopeType.SUBORDINATES },
+// Рівень 20 без явного рядка в матриці: раніше один "кошик" мішав дві різні
+// області (відділ для перегляду, підлеглі для оцінки) — тепер це рівно два
+// призначення з різною областю замість штучного одного профілю.
+const SHIFT_LEAD_ASSIGNMENTS: AssignmentSeed[] = [
+  { profileName: "Перегляд власного профілю", scope: ScopeType.OWN_DEPARTMENT },
+  { profileName: "Керівництво зміною", scope: ScopeType.SUBORDINATES },
 ];
 
-const SELF_VIEW_GRANTS: GrantSeed[] = [{ capability: Capability.VIEW_EMPLOYEE, scope: ScopeType.SELF }];
+const SELF_VIEW_ASSIGNMENTS: AssignmentSeed[] = [{ profileName: "Перегляд власного профілю", scope: ScopeType.SELF }];
 
 // "Маркетолог" не підпадає під жоден рядок матриці й не має рівневого
 // кошика (рівень 30 без власного рядка) — свідома прогалина з докс,
 // не з мого боку. Прав не отримує, доки замовник не уточнить.
 const NO_GRANTS_TITLES = new Set(["Маркетолог"]);
 
-async function seedPermissionGrants() {
-  const profiles = await prisma.positionProfile.findMany();
+async function seedAccessProfiles(): Promise<Map<string, number>> {
+  const profileIdByName = new Map<string, number>();
 
-  for (const profile of profiles) {
-    let grants = explicitGrants[profile.title];
+  for (const p of ACCESS_PROFILES) {
+    const profile = await prisma.accessProfile.upsert({ where: { name: p.name }, update: {}, create: { name: p.name } });
+    profileIdByName.set(p.name, profile.id);
 
-    if (!grants && !NO_GRANTS_TITLES.has(profile.title)) {
-      if (profile.level === 20) grants = SHIFT_LEAD_GRANTS;
-      else if (profile.level === 10 || profile.level === 15) grants = SELF_VIEW_GRANTS;
+    for (const capability of p.capabilities) {
+      const existing = await prisma.accessProfileCapability.findFirst({ where: { accessProfileId: profile.id, capability } });
+      if (!existing) {
+        await prisma.accessProfileCapability.create({ data: { accessProfileId: profile.id, capability } });
+      }
+    }
+  }
+
+  return profileIdByName;
+}
+
+async function seedPositionAccessAssignments(profileIdByName: Map<string, number>) {
+  const positions = await prisma.positionProfile.findMany();
+
+  for (const position of positions) {
+    let assignments = explicitAssignments[position.title];
+
+    if (!assignments && !NO_GRANTS_TITLES.has(position.title)) {
+      if (position.level === 20) assignments = SHIFT_LEAD_ASSIGNMENTS;
+      else if (position.level === 10 || position.level === 15) assignments = SELF_VIEW_ASSIGNMENTS;
     }
 
-    if (!grants) continue;
+    if (!assignments) continue;
 
-    for (const g of grants) {
-      const existing = await prisma.permissionGrant.findFirst({
-        where: { positionProfileId: profile.id, capability: g.capability, scope: g.scope },
+    for (const a of assignments) {
+      const accessProfileId = profileIdByName.get(a.profileName);
+      if (!accessProfileId) continue;
+
+      const existing = await prisma.positionAccessAssignment.findFirst({
+        where: { positionProfileId: position.id, accessProfileId, scope: a.scope },
       });
       if (!existing) {
-        await prisma.permissionGrant.create({
-          data: { positionProfileId: profile.id, capability: g.capability, scope: g.scope },
-        });
+        await prisma.positionAccessAssignment.create({ data: { positionProfileId: position.id, accessProfileId, scope: a.scope } });
       }
     }
   }
@@ -482,8 +520,11 @@ async function seedTestUsers() {
       create: { fullName: u.fullName, phone: u.phone, passwordHash: await hashPassword(DEV_PASSWORD) },
     });
 
+    // За personId, не (personId, staffUnitId) — та сама причина, що й у
+    // seedLineStaff нижче: не воскрешати стару штатну одиницю, якщо
+    // реальний процес (переведення) уже змінив Employment.staffUnitId.
     let employment = await prisma.employment.findFirst({
-      where: { personId: person.id, staffUnitId: staffUnit.id },
+      where: { personId: person.id },
     });
     if (!employment) {
       employment = await prisma.employment.create({
@@ -615,8 +656,14 @@ async function seedLineStaff() {
       create: { fullName: ls.fullName, phone: ls.phone, birthDate: parseUaDate(ls.birthDate) },
     });
 
+    // Навмисно за personId, НЕ за (personId, staffUnitId): якщо людина вже
+    // реально перевелась (staffUnitId змінився на самому Employment) чи
+    // звільнилась через справжній процес, seed не повинен "воскрешати"
+    // застарілу посаду з жорстко заданого рядка нижче — інакше кожен
+    // повторний запуск seed після реального переведення створює дублікат
+    // employment (сталось із Ткаченком Р.І., виправлено 2026-09-15).
     let employment = await prisma.employment.findFirst({
-      where: { personId: person.id, staffUnitId: staffUnit.id },
+      where: { personId: person.id },
     });
     if (!employment) {
       employment = await prisma.employment.create({
@@ -1217,8 +1264,11 @@ async function main() {
   console.log("Навчальні матеріали...");
   await seedMaterials();
 
-  console.log("Матриця прав...");
-  await seedPermissionGrants();
+  console.log("Профілі доступу...");
+  const accessProfileIdByName = await seedAccessProfiles();
+
+  console.log("Призначення профілів доступу посадам...");
+  await seedPositionAccessAssignments(accessProfileIdByName);
 
   console.log("Шаблон онбордингу...");
   await seedOnboardingTemplate();

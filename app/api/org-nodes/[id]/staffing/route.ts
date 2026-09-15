@@ -63,7 +63,17 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
   const totalStaff = roster.reduce((sum, r) => sum + r.actual, 0);
 
   return NextResponse.json({
-    node: { id: node.id, name: node.name, type: node.type, path: node.path, code: node.code },
+    node: {
+      id: node.id,
+      name: node.name,
+      type: node.type,
+      path: node.path,
+      code: node.code,
+      parentId: node.parentId,
+      address: node.address,
+      sortOrder: node.sortOrder,
+      isActive: node.isActive,
+    },
     headFullName,
     totalStaff,
     frozenCount,

@@ -6,7 +6,8 @@ import { getBoss } from "../lib/queue";
 import { checkSlaEscalations } from "../lib/sla";
 import { runPeriodicBadgeChecks } from "../lib/badges-periodic";
 import { acknowledgeReview } from "../lib/review";
-import { Prisma, Role } from "../generated/prisma/client";
+import { checkVacationConflicts, createVacationRequest, type ConflictCheck } from "../lib/vacation";
+import { EmploymentStatus, Prisma, Role, VacationType } from "../generated/prisma/client";
 
 const token = process.env.TELEGRAM_BOT_TOKEN;
 if (!token) {
@@ -41,6 +42,24 @@ const registrations = new Map<number, RegistrationState>();
 // було ввести чужий номер — той самий принцип, що й у реєстрації.
 const linkRequests = new Set<number>();
 
+// ── /vacation: самоподача заявки на відпустку (docs v1.2 §4.1) —
+// архітектурне рішення №1: лінійний персонал працює тільки через бот, тому
+// цей крок дублює те, що адміністратор уже може зробити за працівника у
+// вебі (вкладка "Відпустки" на картці), тим самим типом заявки й тими ж
+// перевірками конфліктів (lib/vacation.ts — спільний код, не дублюється).
+type VacationStep = "type" | "from" | "to" | "confirm";
+
+type VacationState = {
+  step: VacationStep;
+  employmentId: number;
+  type?: VacationType;
+  fromDate?: Date;
+  toDate?: Date;
+  conflict?: ConflictCheck;
+};
+
+const vacationSessions = new Map<number, VacationState>();
+
 function normalizePhone(raw: string): string {
   const trimmed = raw.trim();
   return trimmed.startsWith("+") ? trimmed : `+${trimmed}`;
@@ -69,6 +88,18 @@ function isValidEmail(text: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text.trim());
 }
 
+/** ДД.ММ.РРРР без вікових обмежень parseBirthDate — для дат відпустки. */
+function parseDateDMY(text: string): Date | null {
+  const match = text.trim().match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
+  if (!match) return null;
+  const [, dd, mm, yyyy] = match;
+  const date = new Date(Number(yyyy), Number(mm) - 1, Number(dd));
+  if (date.getFullYear() !== Number(yyyy) || date.getMonth() !== Number(mm) - 1 || date.getDate() !== Number(dd)) {
+    return null;
+  }
+  return date;
+}
+
 bot.command("start", async (ctx) => {
   if (!ctx.from) return;
   const payload = ctx.match?.toString().trim();
@@ -76,7 +107,8 @@ bot.command("start", async (ctx) => {
   if (!payload) {
     await ctx.reply(
       "Вітаю! Це бот системи управління персоналом мережі «Коровай». Щоб зареєструватись, відскануйте QR-код на вашому об'єкті.\n\n" +
-        "Якщо ви вже працюєте в компанії й хочете отримувати сповіщення сюди — напишіть /link.",
+        "Якщо ви вже працюєте в компанії й хочете отримувати сповіщення сюди — напишіть /link.\n" +
+        "Щоб подати заявку на відпустку — напишіть /vacation.",
     );
     return;
   }
@@ -125,7 +157,110 @@ bot.command("link", async (ctx) => {
   );
 });
 
+bot.command("vacation", async (ctx) => {
+  if (!ctx.from) return;
+
+  const person = await prisma.person.findUnique({ where: { telegramId: BigInt(ctx.from.id) } });
+  if (!person) {
+    await ctx.reply("Спершу прив'яжіть Telegram до вашого акаунта — напишіть /link.");
+    return;
+  }
+
+  const employment = await prisma.employment.findFirst({ where: { personId: person.id, status: { not: EmploymentStatus.TERMINATED } } });
+  if (!employment) {
+    await ctx.reply("У вас немає активного працевлаштування в системі.");
+    return;
+  }
+
+  vacationSessions.set(ctx.from.id, { step: "type", employmentId: employment.id });
+  await ctx.reply("Яка відпустка?\n\n1 — Щорічна\n2 — Без збереження зарплати\n\nВведіть 1 або 2.");
+});
+
 bot.on("message:text", async (ctx) => {
+  const vacState = vacationSessions.get(ctx.from.id);
+  if (vacState) {
+    if (vacState.step === "type") {
+      const text = ctx.message.text.trim();
+      if (text !== "1" && text !== "2") {
+        await ctx.reply("Введіть 1 (щорічна) або 2 (без збереження зарплати).");
+        return;
+      }
+      vacState.type = text === "1" ? VacationType.ANNUAL : VacationType.UNPAID;
+      vacState.step = "from";
+      await ctx.reply("З якого дня? Формат: ДД.ММ.РРРР.");
+      return;
+    }
+
+    if (vacState.step === "from") {
+      const date = parseDateDMY(ctx.message.text);
+      if (!date) {
+        await ctx.reply("Не вдалося розпізнати дату. Формат: ДД.ММ.РРРР, наприклад 01.10.2026.");
+        return;
+      }
+      vacState.fromDate = date;
+      vacState.step = "to";
+      await ctx.reply("По який день (включно)? Формат: ДД.ММ.РРРР.");
+      return;
+    }
+
+    if (vacState.step === "to") {
+      const date = parseDateDMY(ctx.message.text);
+      if (!date) {
+        await ctx.reply("Не вдалося розпізнати дату. Формат: ДД.ММ.РРРР, наприклад 10.10.2026.");
+        return;
+      }
+      if (!vacState.fromDate || date < vacState.fromDate) {
+        await ctx.reply("Дата закінчення раніше дати початку. Введіть ще раз дату «по».");
+        return;
+      }
+      vacState.toDate = date;
+
+      const conflict = await checkVacationConflicts(vacState.employmentId, vacState.fromDate, date);
+      vacState.conflict = conflict;
+      vacState.step = "confirm";
+
+      const days = Math.round((date.getTime() - vacState.fromDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+      const typeLabel = vacState.type === VacationType.ANNUAL ? "Щорічна" : "Без збереження зарплати";
+      const warning = conflict.conflictNote ? `\n\n⚠ ${conflict.conflictNote}` : "";
+      await ctx.reply(
+        `Перевірте заявку:\n${typeLabel}, ${ctx.message.text.trim()} — ${days} дн.${warning}\n\nНадіслати? Введіть «так» або «ні».`,
+      );
+      return;
+    }
+
+    if (vacState.step === "confirm") {
+      const text = ctx.message.text.trim().toLowerCase();
+      if (text !== "так" && text !== "ні") {
+        await ctx.reply("Введіть «так» або «ні».");
+        return;
+      }
+      if (text === "ні") {
+        vacationSessions.delete(ctx.from.id);
+        await ctx.reply("Заявку скасовано.");
+        return;
+      }
+
+      if (!vacState.type || !vacState.fromDate || !vacState.toDate) return;
+      const person = await prisma.person.findUnique({ where: { telegramId: BigInt(ctx.from.id) } });
+      const createdBy = person ? await prisma.employment.findFirst({ where: { personId: person.id } }) : null;
+      if (!createdBy) {
+        vacationSessions.delete(ctx.from.id);
+        await ctx.reply("Сталася помилка. Спробуйте ще раз /vacation.");
+        return;
+      }
+
+      const result = await createVacationRequest(vacState.employmentId, { type: vacState.type, fromDate: vacState.fromDate, toDate: vacState.toDate }, createdBy.id);
+      vacationSessions.delete(ctx.from.id);
+
+      if (!result.ok) {
+        await ctx.reply(`Не вдалося подати заявку: ${result.error}`);
+        return;
+      }
+      await ctx.reply("Заявку подано. Керівника сповіщено — очікуйте на рішення.");
+      return;
+    }
+  }
+
   const state = registrations.get(ctx.from.id);
   if (!state) return;
 

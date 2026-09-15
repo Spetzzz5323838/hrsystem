@@ -61,9 +61,14 @@ async function resolveNodeScope(scope: ScopeType, staffNodePath: string, customN
 }
 
 /**
- * Ефективні права людини зараз: об'єднання грантів від профілю посади
- * (по всіх чинних Employment) і від функціональних ролей (RoleAssignment).
- * Кожен грант — з уже розрахованим вузлом-областю, де це має сенс.
+ * Ефективні права людини зараз: об'єднання призначень профілів доступу —
+ * від профілю посади (по всіх чинних Employment) і від функціональних
+ * ролей (RoleAssignment). Профіль (AccessProfile) — набір можливостей без
+ * області; область задає саме призначення (PositionAccessAssignment).
+ * Один профіль може бути призначений кільком посадам з РІЗНОЮ областю
+ * (напр. "Повне управління персоналом" — адміну магазину по OWN_OBJECT,
+ * директору кластера по OWN_SUBTREE) — звідси й economy порівняно зі
+ * старою моделлю, де довелось би дублювати сам список можливостей.
  */
 export async function getEffectiveGrants(personId: number): Promise<EffectiveGrant[]> {
   const employments = await prisma.employment.findMany({
@@ -72,7 +77,9 @@ export async function getEffectiveGrants(personId: number): Promise<EffectiveGra
       staffUnit: {
         include: {
           orgNode: true,
-          positionProfile: { include: { permissionGrants: true } },
+          positionProfile: {
+            include: { accessAssignments: { include: { accessProfile: { include: { capabilities: true } } } } },
+          },
         },
       },
       roleAssignments: { include: { orgNode: true } },
@@ -84,22 +91,23 @@ export async function getEffectiveGrants(personId: number): Promise<EffectiveGra
   for (const employment of employments) {
     const staffNodePath = employment.staffUnit.orgNode.path;
 
-    for (const grant of employment.staffUnit.positionProfile.permissionGrants) {
-      grants.push({
-        capability: grant.capability,
-        scope: grant.scope,
-        scopePath: await resolveNodeScope(grant.scope, staffNodePath, grant.customNodeId),
-      });
+    for (const assignment of employment.staffUnit.positionProfile.accessAssignments) {
+      const scopePath = await resolveNodeScope(assignment.scope, staffNodePath, assignment.customNodeId);
+      for (const cap of assignment.accessProfile.capabilities) {
+        grants.push({ capability: cap.capability, scope: assignment.scope, scopePath });
+      }
     }
 
     for (const roleAssignment of employment.roleAssignments) {
-      const roleGrants = await prisma.permissionGrant.findMany({ where: { role: roleAssignment.role } });
-      for (const grant of roleGrants) {
-        grants.push({
-          capability: grant.capability,
-          scope: grant.scope,
-          scopePath: await resolveNodeScope(grant.scope, roleAssignment.orgNode.path, grant.customNodeId),
-        });
+      const roleAccessAssignments = await prisma.positionAccessAssignment.findMany({
+        where: { role: roleAssignment.role },
+        include: { accessProfile: { include: { capabilities: true } } },
+      });
+      for (const assignment of roleAccessAssignments) {
+        const scopePath = await resolveNodeScope(assignment.scope, roleAssignment.orgNode.path, assignment.customNodeId);
+        for (const cap of assignment.accessProfile.capabilities) {
+          grants.push({ capability: cap.capability, scope: assignment.scope, scopePath });
+        }
       }
     }
   }
@@ -181,4 +189,18 @@ export async function canManageTemplates(personId: number): Promise<boolean> {
   const root = await companyRootPath();
   if (!root) return false;
   return can(personId, Capability.MANAGE_TEMPLATES, { orgNodePath: root });
+}
+
+/** Редагування дерева оргструктури (docs plan-v1.md §15) — MANAGE_ORG_STRUCTURE, COMPANY-скоуп. */
+export async function canManageOrgStructure(personId: number): Promise<boolean> {
+  const root = await companyRootPath();
+  if (!root) return false;
+  return can(personId, Capability.MANAGE_ORG_STRUCTURE, { orgNodePath: root });
+}
+
+/** Екран "Права доступу" (docs catalogs-v1.1.md §4.5) — MANAGE_PERMISSIONS, COMPANY-скоуп. */
+export async function canManagePermissions(personId: number): Promise<boolean> {
+  const root = await companyRootPath();
+  if (!root) return false;
+  return can(personId, Capability.MANAGE_PERMISSIONS, { orgNodePath: root });
 }

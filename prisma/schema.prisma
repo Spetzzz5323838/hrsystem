@@ -65,6 +65,13 @@ enum Capability {
   FREEZE
   INIT_TRANSFER
   APPROVE_TRANSFER
+  /// Екран "Права доступу" (catalogs-v1.1.md §4.5) не називає власну
+  /// можливість для себе — назва взята з prototype ACTORS.caps ("PERMISSIONS"),
+  /// той самий пробіл докс, що й вище.
+  MANAGE_PERMISSIONS
+  /// Відпустки (v1.2 §4) — те саме, що вище: докс не називає можливість,
+  /// беру APPROVE_VACATION з прототипу (ACTORS.caps).
+  APPROVE_VACATION
 }
 
 enum EmploymentStatus {
@@ -193,11 +200,11 @@ model OrgNode {
   sortOrder   Int     @default(0)
   externalRef String?
 
-  staffUnits       StaffUnit[]
-  permissionGrants PermissionGrant[]
-  roleAssignments  RoleAssignment[]
-  equipment        Equipment[]
-  pendingHires     PendingHire[]
+  staffUnits                StaffUnit[]
+  positionAccessAssignments PositionAccessAssignment[]
+  roleAssignments           RoleAssignment[]
+  equipment                 Equipment[]
+  pendingHires              PendingHire[]
 
   @@index([path])
 }
@@ -332,6 +339,9 @@ model Employment {
   reviews                  Review[]
   confirmedReviews         Review[]             @relation("ReviewConfirmedBy")
   createdReviews           Review[]             @relation("ReviewCreatedBy")
+  vacationRequests         VacationRequest[]
+  createdVacationRequests  VacationRequest[]    @relation("VacationCreatedBy")
+  decidedVacationRequests  VacationRequest[]    @relation("VacationDecidedBy")
 
   @@index([personId])
   @@index([staffUnitId])
@@ -353,7 +363,7 @@ model PositionProfile {
   moduleFlags            ChecklistModule[] @default([])
 
   staffUnits             StaffUnit[]
-  permissionGrants       PermissionGrant[]
+  accessAssignments      PositionAccessAssignment[]
   positionCompetencies   PositionCompetency[]
   attestationTemplate    AttestationTemplate?
   reviewCriterionWeights ReviewCriterionWeight[]
@@ -373,14 +383,38 @@ model StaffUnit {
   @@unique([positionProfileId, orgNodeId])
 }
 
-/// Права = можливість (capability) x область дії (scope). Грант видається
-/// або через профіль посади, або через функціональну роль.
-model PermissionGrant {
+/// Профіль доступу — пойменований набір можливостей (capability) БЕЗ
+/// області дії. Адмініструється окремо від того, кому його призначено —
+/// "Повне управління об'єктом" можна дати і адміністратору магазину, і
+/// директору кластера, кожному зі своєю областю (PositionAccessAssignment).
+model AccessProfile {
+  id          Int     @id @default(autoincrement())
+  name        String  @unique
+  description String?
+
+  capabilities AccessProfileCapability[]
+  assignments  PositionAccessAssignment[]
+}
+
+model AccessProfileCapability {
+  id              Int           @id @default(autoincrement())
+  accessProfileId Int
+  accessProfile   AccessProfile @relation(fields: [accessProfileId], references: [id])
+  capability      Capability
+
+  @@unique([accessProfileId, capability])
+}
+
+/// Призначення профілю доступу посаді або функціональній ролі — тут і
+/// тільки тут задається область дії (scope). Одна посада може мати кілька
+/// призначень (базовий профіль + додатковий, кожен зі своєю областю).
+model PositionAccessAssignment {
   id                Int              @id @default(autoincrement())
   positionProfileId Int?
   positionProfile   PositionProfile? @relation(fields: [positionProfileId], references: [id])
   role              Role?
-  capability        Capability
+  accessProfileId   Int
+  accessProfile     AccessProfile    @relation(fields: [accessProfileId], references: [id])
   scope             ScopeType
   customNodeId      Int?
   customNode        OrgNode?         @relation(fields: [customNodeId], references: [id])
@@ -742,6 +776,53 @@ model ReviewScore {
   weight    Int
 
   @@unique([reviewId, criterion])
+}
+
+enum VacationType {
+  ANNUAL
+  UNPAID
+}
+
+enum VacationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+/// Заявка на відпустку (docs v1.2 §4). Погодження — не через рушій
+/// чек-лістів (як онбординг/переведення/звільнення), а пряме рішення
+/// погоджувача, як і RatingEvent — тут нема покрокового процесу, лише
+/// заявка → перевірка конфліктів → рішення.
+model VacationRequest {
+  id           Int            @id @default(autoincrement())
+  employmentId Int
+  employment   Employment     @relation(fields: [employmentId], references: [id])
+  type         VacationType
+  fromDate     DateTime
+  toDate       DateTime
+  status       VacationStatus @default(PENDING)
+
+  /// Заявлено менше ніж за 14 днів до початку (docs §4.2).
+  isOutOfSchedule    Boolean @default(false)
+  /// Одночасно відсутні >30% штатних одиниць цієї посади у цьому вузлі —
+  /// або (isCriticalPosition) працівник єдиний на посаді у вузлі.
+  hasConflict        Boolean @default(false)
+  isCriticalPosition Boolean @default(false)
+  conflictNote       String?
+  /// true, якщо isOutOfSchedule АБО hasConflict (без критичної) — рішення
+  /// вимагає ширшої області, ніж прямий керівник об'єкта (docs: "рівнем вище").
+  requiresEscalation Boolean @default(false)
+
+  createdById  Int
+  createdBy    Employment  @relation("VacationCreatedBy", fields: [createdById], references: [id])
+  decidedById  Int?
+  decidedBy    Employment? @relation("VacationDecidedBy", fields: [decidedById], references: [id])
+  decidedAt    DateTime?
+  rejectReason String?
+
+  createdAt DateTime @default(now())
+
+  @@index([employmentId])
 }
 
 /// Довідник причин заморозки (docs v1.2 §3) — редагується.

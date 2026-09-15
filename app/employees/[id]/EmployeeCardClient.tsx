@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Award, Check, Clock, Eye, Lock, Phone, Star, ThumbsDown, ThumbsUp, X } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Award, Check, Clock, Eye, Lock, Phone, Star, ThumbsDown, ThumbsUp, X } from "lucide-react";
 
 type CompetencyRow = {
   competencyId: number;
@@ -259,6 +259,7 @@ const TABS = [
   ["docs", "Документи"],
   ["rating", "Рейтинг"],
   ["review", "Квартальна оцінка"],
+  ["vac", "Відпустки"],
   ["equip", "Обладнання"],
   ["hist", "Історія"],
 ] as const;
@@ -1487,6 +1488,83 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
       .finally(() => setConfirmingReviewId(null));
   };
 
+  type VacationRow = {
+    id: number;
+    type: "ANNUAL" | "UNPAID";
+    fromDate: string;
+    toDate: string;
+    status: "PENDING" | "APPROVED" | "REJECTED";
+    isOutOfSchedule: boolean;
+    hasConflict: boolean;
+    isCriticalPosition: boolean;
+    requiresEscalation: boolean;
+    conflictNote: string | null;
+    createdByName: string;
+    decidedByName: string | null;
+    rejectReason: string | null;
+  };
+  const [vacations, setVacations] = useState<VacationRow[] | null>(null);
+  const [vacError, setVacError] = useState<string | null>(null);
+  const [vacType, setVacType] = useState<"ANNUAL" | "UNPAID">("ANNUAL");
+  const [vacFrom, setVacFrom] = useState("");
+  const [vacTo, setVacTo] = useState("");
+  const [vacSubmitting, setVacSubmitting] = useState(false);
+  const [vacBusyId, setVacBusyId] = useState<number | null>(null);
+
+  const loadVacations = () => {
+    fetch(`/api/employees/${employmentId}/vacations`)
+      .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
+      .then(({ ok, body }) => {
+        if (!ok) throw new Error(body.error ?? "Не вдалося завантажити відпустки");
+        setVacations(body);
+        setVacError(null);
+      })
+      .catch((e) => setVacError(e.message));
+  };
+
+  useEffect(() => {
+    loadVacations();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [employmentId]);
+
+  const submitVacation = () => {
+    if (!vacFrom || !vacTo) return;
+    setVacSubmitting(true);
+    fetch(`/api/employees/${employmentId}/vacations`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: vacType, fromDate: vacFrom, toDate: vacTo }),
+    })
+      .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
+      .then(({ ok, body }) => {
+        if (!ok) throw new Error(body.error ?? "Не вдалося подати заявку");
+        setVacFrom("");
+        setVacTo("");
+        loadVacations();
+      })
+      .catch((e) => setVacError(e.message))
+      .finally(() => setVacSubmitting(false));
+  };
+
+  const decideVacation = (id: number, decision: "APPROVED" | "REJECTED") => {
+    const rejectReason = decision === "REJECTED" ? prompt("Причина відхилення:") : undefined;
+    if (decision === "REJECTED" && !rejectReason) return;
+
+    setVacBusyId(id);
+    fetch(`/api/vacation-requests/${id}/decide`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ decision, rejectReason }),
+    })
+      .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
+      .then(({ ok, body }) => {
+        if (!ok) throw new Error(body.error ?? "Не вдалося зберегти рішення");
+        loadVacations();
+      })
+      .catch((e) => setVacError(e.message))
+      .finally(() => setVacBusyId(null));
+  };
+
   if (error) {
     return <div className="px-6 py-6 text-sm text-rose-700">{error}</div>;
   }
@@ -2348,6 +2426,88 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
                 </Section>
               </>
             )}
+          </div>
+        )}
+
+        {tab === "vac" && (
+          <div className="space-y-4">
+            {vacError && <p className="text-sm text-rose-700">{vacError}</p>}
+
+            <Section title="Подати заявку">
+              <div className="flex flex-wrap items-end gap-3 px-4 py-3">
+                <div className="space-y-1">
+                  <label className="block text-xs text-slate-600">Тип</label>
+                  <select value={vacType} onChange={(e) => setVacType(e.target.value as "ANNUAL" | "UNPAID")} className="rounded border border-slate-300 px-2 py-1.5 text-sm">
+                    <option value="ANNUAL">Щорічна</option>
+                    <option value="UNPAID">Без збереження зарплати</option>
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="block text-xs text-slate-600">З</label>
+                  <input type="date" value={vacFrom} onChange={(e) => setVacFrom(e.target.value)} className="rounded border border-slate-300 px-2 py-1.5 text-sm" />
+                </div>
+                <div className="space-y-1">
+                  <label className="block text-xs text-slate-600">По</label>
+                  <input type="date" value={vacTo} onChange={(e) => setVacTo(e.target.value)} className="rounded border border-slate-300 px-2 py-1.5 text-sm" />
+                </div>
+                <button
+                  disabled={vacSubmitting || !vacFrom || !vacTo}
+                  onClick={submitVacation}
+                  className="rounded bg-slate-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50"
+                >
+                  Подати
+                </button>
+              </div>
+            </Section>
+
+            <Section title="Заявки">
+              <div className="divide-y divide-slate-100">
+                {(vacations ?? []).map((v) => (
+                  <div key={v.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-slate-900">
+                        {v.type === "ANNUAL" ? "Щорічна" : "Без збереження зарплати"}: {new Date(v.fromDate).toLocaleDateString("uk-UA")} —{" "}
+                        {new Date(v.toDate).toLocaleDateString("uk-UA")}
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        Подав: {v.createdByName}
+                        {v.decidedByName && ` · Вирішив: ${v.decidedByName}`}
+                        {v.rejectReason && ` · Причина: ${v.rejectReason}`}
+                      </p>
+                      {v.conflictNote && (
+                        <p className="mt-1 flex items-center gap-1 text-xs text-amber-700">
+                          <AlertTriangle size={12} /> {v.conflictNote}
+                        </p>
+                      )}
+                    </div>
+                    {v.status === "PENDING" ? (
+                      <div className="flex items-center gap-2">
+                        <span className="rounded border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs text-amber-800">на погодженні</span>
+                        <button
+                          disabled={vacBusyId === v.id}
+                          onClick={() => decideVacation(v.id, "APPROVED")}
+                          className="rounded bg-slate-800 px-2.5 py-1 text-xs font-medium text-white hover:bg-slate-700 disabled:opacity-50"
+                        >
+                          Погодити
+                        </button>
+                        <button
+                          disabled={vacBusyId === v.id}
+                          onClick={() => decideVacation(v.id, "REJECTED")}
+                          className="rounded border border-slate-300 px-2.5 py-1 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                        >
+                          Відхилити
+                        </button>
+                      </div>
+                    ) : (
+                      <span className={`rounded border px-2 py-0.5 text-xs ${v.status === "APPROVED" ? "border-emerald-300 bg-emerald-50 text-emerald-700" : "border-rose-300 bg-rose-50 text-rose-700"}`}>
+                        {v.status === "APPROVED" ? "погоджено" : "відхилено"}
+                      </span>
+                    )}
+                  </div>
+                ))}
+                {!(vacations ?? []).length && <p className="px-4 py-8 text-center text-sm text-slate-500">Заявок ще не було.</p>}
+              </div>
+            </Section>
           </div>
         )}
 

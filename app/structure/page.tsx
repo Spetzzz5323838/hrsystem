@@ -19,8 +19,20 @@ type RosterRow = {
   actual: number;
 };
 
+type StaffingNode = {
+  id: number;
+  name: string;
+  type: OrgNode["type"];
+  path: string;
+  code: string | null;
+  parentId: number | null;
+  address: string | null;
+  sortOrder: number;
+  isActive: boolean;
+};
+
 type Staffing = {
-  node: { id: number; name: string; type: OrgNode["type"]; path: string; code: string | null };
+  node: StaffingNode;
   headFullName: string | null;
   totalStaff: number;
   frozenCount: number;
@@ -39,6 +51,207 @@ function Section({ title, right, children }: { title: string; right?: React.Reac
   );
 }
 
+const NODE_TYPE_LABELS: Record<OrgNode["type"], string> = {
+  COMPANY: "Компанія",
+  DIVISION: "Напрям / кластер",
+  OBJECT: "Об'єкт",
+  DEPARTMENT: "Відділ",
+};
+
+/** Модальне вікно "Створити вузол" — форма поверх наявного дерева. */
+function CreateNodeModal({
+  nodes,
+  defaultParentId,
+  onClose,
+  onCreated,
+}: {
+  nodes: OrgNode[];
+  defaultParentId: number;
+  onClose: () => void;
+  onCreated: () => void;
+}) {
+  const [type, setType] = useState<OrgNode["type"]>("DEPARTMENT");
+  const [name, setName] = useState("");
+  const [code, setCode] = useState("");
+  const [parentId, setParentId] = useState(defaultParentId);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const submit = () => {
+    if (!name.trim()) {
+      setError("Вкажіть назву");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    fetch("/api/org-nodes", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type, name, code: code || null, parentId }),
+    })
+      .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
+      .then(({ ok, body }) => {
+        if (!ok) throw new Error(body.error ?? "Не вдалося створити вузол");
+        onCreated();
+      })
+      .catch((e) => setError(e.message))
+      .finally(() => setBusy(false));
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4">
+      <div className="w-full max-w-md space-y-3 rounded-md border border-slate-200 bg-white p-5">
+        <h3 className="text-sm font-semibold text-slate-900">Створити вузол</h3>
+
+        <div className="space-y-1">
+          <label className="block text-xs text-slate-600">Тип</label>
+          <select value={type} onChange={(e) => setType(e.target.value as OrgNode["type"])} className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm">
+            <option value="DIVISION">Напрям / кластер</option>
+            <option value="OBJECT">Об'єкт</option>
+            <option value="DEPARTMENT">Відділ</option>
+          </select>
+        </div>
+
+        <div className="space-y-1">
+          <label className="block text-xs text-slate-600">Батьківський вузол</label>
+          <select value={parentId} onChange={(e) => setParentId(Number(e.target.value))} className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm">
+            {nodes.map((n) => (
+              <option key={n.id} value={n.id}>
+                {"— ".repeat(n.path.split(".").length - 1)}
+                {n.name}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="space-y-1">
+          <label className="block text-xs text-slate-600">Назва</label>
+          <input value={name} onChange={(e) => setName(e.target.value)} autoFocus className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm" />
+        </div>
+
+        <div className="space-y-1">
+          <label className="block text-xs text-slate-600">Код (необов&rsquo;язково)</label>
+          <input value={code} onChange={(e) => setCode(e.target.value)} className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm" />
+        </div>
+
+        {error && <p className="text-sm text-rose-700">{error}</p>}
+
+        <div className="flex justify-end gap-2 pt-1">
+          <button onClick={onClose} className="rounded border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-50">
+            Скасувати
+          </button>
+          <button
+            disabled={busy}
+            onClick={submit}
+            className="rounded bg-slate-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50"
+          >
+            Створити
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Модальне вікно "Створити об'єкт за шаблоном" — клонує відділи й штатний розпис. */
+function TemplateModal({
+  objectNodes,
+  parentNodes,
+  defaultParentId,
+  onClose,
+  onCreated,
+}: {
+  objectNodes: OrgNode[];
+  parentNodes: OrgNode[];
+  defaultParentId: number;
+  onClose: () => void;
+  onCreated: () => void;
+}) {
+  const [sourceObjectId, setSourceObjectId] = useState(objectNodes[0]?.id ?? 0);
+  const [targetParentId, setTargetParentId] = useState(defaultParentId);
+  const [name, setName] = useState("");
+  const [code, setCode] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const submit = () => {
+    if (!name.trim()) {
+      setError("Вкажіть назву нового об'єкта");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    fetch("/api/org-nodes/from-template", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sourceObjectId, targetParentId, name, code: code || null }),
+    })
+      .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
+      .then(({ ok, body }) => {
+        if (!ok) throw new Error(body.error ?? "Не вдалося створити об'єкт");
+        onCreated();
+      })
+      .catch((e) => setError(e.message))
+      .finally(() => setBusy(false));
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4">
+      <div className="w-full max-w-md space-y-3 rounded-md border border-slate-200 bg-white p-5">
+        <h3 className="text-sm font-semibold text-slate-900">Створити об&rsquo;єкт за шаблоном</h3>
+        <p className="text-xs text-slate-500">Скопіює відділи й штатний розпис вибраного об&rsquo;єкта в новий.</p>
+
+        <div className="space-y-1">
+          <label className="block text-xs text-slate-600">Об&rsquo;єкт-шаблон</label>
+          <select value={sourceObjectId} onChange={(e) => setSourceObjectId(Number(e.target.value))} className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm">
+            {objectNodes.map((n) => (
+              <option key={n.id} value={n.id}>
+                {n.name}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="space-y-1">
+          <label className="block text-xs text-slate-600">Куди помістити новий об&rsquo;єкт</label>
+          <select value={targetParentId} onChange={(e) => setTargetParentId(Number(e.target.value))} className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm">
+            {parentNodes.map((n) => (
+              <option key={n.id} value={n.id}>
+                {n.name}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="space-y-1">
+          <label className="block text-xs text-slate-600">Назва нового об&rsquo;єкта</label>
+          <input value={name} onChange={(e) => setName(e.target.value)} autoFocus className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm" />
+        </div>
+
+        <div className="space-y-1">
+          <label className="block text-xs text-slate-600">Код (необов&rsquo;язково)</label>
+          <input value={code} onChange={(e) => setCode(e.target.value)} className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm" />
+        </div>
+
+        {error && <p className="text-sm text-rose-700">{error}</p>}
+
+        <div className="flex justify-end gap-2 pt-1">
+          <button onClick={onClose} className="rounded border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-50">
+            Скасувати
+          </button>
+          <button
+            disabled={busy || !objectNodes.length}
+            onClick={submit}
+            className="rounded bg-slate-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50"
+          >
+            Створити
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function StructurePage() {
   const [nodes, setNodes] = useState<OrgNode[] | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -49,31 +262,62 @@ export default function StructurePage() {
   const [qrError, setQrError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
+  const [canManage, setCanManage] = useState(false);
+  const [showCreate, setShowCreate] = useState(false);
+  const [showTemplate, setShowTemplate] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+  const [moveTargetId, setMoveTargetId] = useState<number | null>(null);
+  const [moveBusy, setMoveBusy] = useState(false);
+
   useEffect(() => {
-    fetch("/api/org-tree")
+    fetch("/api/me")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((me) => setCanManage(!!me?.grants?.some((g: { capability: string }) => g.capability === "MANAGE_ORG_STRUCTURE")))
+      .catch(() => setCanManage(false));
+  }, []);
+
+  const loadTree = () => {
+    return fetch("/api/org-tree")
       .then((r) => {
         if (!r.ok) throw new Error(r.status === 401 ? "Потрібно увійти в систему" : "Не вдалося завантажити дерево");
         return r.json();
       })
       .then((data: OrgNode[]) => {
         setNodes(data);
-        setOpenIds(new Set(data.map((n) => n.id)));
-        const root = data.find((n) => n.type === "COMPANY");
-        setSelectedId(root ? root.id : (data[0]?.id ?? null));
-      })
+        setOpenIds((prev) => new Set([...prev, ...data.map((n) => n.id)]));
+      });
+  };
+
+  useEffect(() => {
+    loadTree()
+      .then(() => {})
       .catch((e) => setError(e.message));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    if (selectedId == null) return;
+    if (nodes && selectedId == null) {
+      const root = nodes.find((n) => n.type === "COMPANY");
+      setSelectedId(root ? root.id : (nodes[0]?.id ?? null));
+    }
+  }, [nodes, selectedId]);
+
+  const loadStaffing = (nodeId: number) => {
     setStaffing(null);
-    fetch(`/api/org-nodes/${selectedId}/staffing`)
+    fetch(`/api/org-nodes/${nodeId}/staffing`)
       .then((r) => {
         if (!r.ok) throw new Error("Не вдалося завантажити картку вузла");
         return r.json();
       })
       .then(setStaffing)
       .catch((e) => setError(e.message));
+  };
+
+  useEffect(() => {
+    if (selectedId == null) return;
+    loadStaffing(selectedId);
+    setEditError(null);
+    setMoveTargetId(null);
 
     setQr(null);
     setQrError(null);
@@ -85,6 +329,7 @@ export default function StructurePage() {
         setQr(body);
       })
       .catch((e) => setQrError(e.message));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId]);
 
   const copyLink = () => {
@@ -164,11 +409,69 @@ export default function StructurePage() {
   }
 
   const root = nodes.find((n) => n.parentId === null);
+  const objectNodes = nodes.filter((n) => n.type === "OBJECT");
+  const possibleParents = nodes.filter((n) => n.type === "DIVISION" || n.type === "COMPANY");
+
+  const patchNode = (data: Record<string, unknown>) => {
+    if (!staffing) return;
+    setEditError(null);
+    fetch(`/api/org-nodes/${staffing.node.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    })
+      .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
+      .then(({ ok, body }) => {
+        if (!ok) throw new Error(body.error ?? "Не вдалося зберегти");
+        loadStaffing(staffing.node.id);
+        loadTree().catch(() => {});
+      })
+      .catch((e) => setEditError(e.message));
+  };
+
+  const move = () => {
+    if (!staffing || moveTargetId == null) return;
+    setMoveBusy(true);
+    setEditError(null);
+    fetch(`/api/org-nodes/${staffing.node.id}/move`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ newParentId: moveTargetId }),
+    })
+      .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
+      .then(({ ok, body }) => {
+        if (!ok) throw new Error(body.error ?? "Не вдалося перемістити вузол");
+        return loadTree();
+      })
+      .then(() => loadStaffing(staffing.node.id))
+      .catch((e) => setEditError(e.message))
+      .finally(() => setMoveBusy(false));
+  };
 
   return (
     <div className="min-h-screen bg-slate-100 px-6 py-6">
       <div className="space-y-4">
-        <h2 className="text-xl font-semibold text-slate-900">Структура компанії</h2>
+        <div className="flex items-baseline justify-between">
+          <h2 className="text-xl font-semibold text-slate-900">Структура компанії</h2>
+          {canManage && (
+            <div className="flex gap-2">
+              <button
+                onClick={() => setShowTemplate(true)}
+                disabled={!objectNodes.length}
+                className="rounded border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              >
+                Створити об&rsquo;єкт за шаблоном
+              </button>
+              <button
+                onClick={() => setShowCreate(true)}
+                className="rounded bg-slate-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-700"
+              >
+                + Створити вузол
+              </button>
+            </div>
+          )}
+        </div>
+
         <div className="grid gap-4 lg:grid-cols-3">
           <div className="border border-slate-200 bg-white rounded-md p-2">{root && renderNode(root, 0)}</div>
           <div className="space-y-4 lg:col-span-2">
@@ -177,8 +480,9 @@ export default function StructurePage() {
                 <Section
                   title={staffing.node.name}
                   right={
-                    <span className="text-xs text-slate-500">
-                      {staffing.node.type} · шлях {staffing.node.path}
+                    <span className="flex items-center gap-2 text-xs text-slate-500">
+                      {NODE_TYPE_LABELS[staffing.node.type]} · шлях {staffing.node.path}
+                      {!staffing.node.isActive && <span className="rounded border border-slate-300 bg-slate-100 px-1.5 py-0.5 text-slate-600">архівний</span>}
                     </span>
                   }
                 >
@@ -197,6 +501,76 @@ export default function StructurePage() {
                     </div>
                   </div>
                 </Section>
+
+                {canManage && staffing.node.type !== "COMPANY" && (
+                  <Section title="Редагування вузла">
+                    <div className="grid grid-cols-2 gap-3 px-4 py-3 text-sm">
+                      <div className="space-y-1">
+                        <label className="block text-xs text-slate-600">Назва</label>
+                        <input
+                          key={`name-${staffing.node.id}`}
+                          defaultValue={staffing.node.name}
+                          onBlur={(e) => e.target.value.trim() && e.target.value !== staffing.node.name && patchNode({ name: e.target.value.trim() })}
+                          className="w-full rounded border border-slate-300 px-2 py-1 text-sm"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="block text-xs text-slate-600">Код</label>
+                        <input
+                          key={`code-${staffing.node.id}`}
+                          defaultValue={staffing.node.code ?? ""}
+                          onBlur={(e) => e.target.value !== (staffing.node.code ?? "") && patchNode({ code: e.target.value || null })}
+                          className="w-full rounded border border-slate-300 px-2 py-1 text-sm"
+                        />
+                      </div>
+                      <div className="col-span-2 space-y-1">
+                        <label className="block text-xs text-slate-600">Адреса</label>
+                        <input
+                          key={`address-${staffing.node.id}`}
+                          defaultValue={staffing.node.address ?? ""}
+                          onBlur={(e) => e.target.value !== (staffing.node.address ?? "") && patchNode({ address: e.target.value || null })}
+                          className="w-full rounded border border-slate-300 px-2 py-1 text-sm"
+                        />
+                      </div>
+
+                      <div className="col-span-2 flex items-center justify-between border-t border-slate-100 pt-3">
+                        <div className="flex items-center gap-2">
+                          <select
+                            value={moveTargetId ?? ""}
+                            onChange={(e) => setMoveTargetId(e.target.value ? Number(e.target.value) : null)}
+                            className="rounded border border-slate-300 px-2 py-1 text-sm"
+                          >
+                            <option value="">Перемістити до…</option>
+                            {possibleParents
+                              .filter((n) => n.id !== staffing.node.id)
+                              .map((n) => (
+                                <option key={n.id} value={n.id}>
+                                  {n.name}
+                                </option>
+                              ))}
+                          </select>
+                          <button
+                            onClick={move}
+                            disabled={moveTargetId == null || moveBusy}
+                            className="rounded border border-slate-300 px-2 py-1 text-sm hover:bg-slate-50 disabled:opacity-50"
+                          >
+                            Перемістити
+                          </button>
+                        </div>
+                        <button
+                          onClick={() => patchNode({ isActive: !staffing.node.isActive })}
+                          className={`rounded px-3 py-1.5 text-sm font-medium ${
+                            staffing.node.isActive ? "border border-rose-300 text-rose-700 hover:bg-rose-50" : "border border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+                          }`}
+                        >
+                          {staffing.node.isActive ? "Архівувати" : "Активувати"}
+                        </button>
+                      </div>
+                      {editError && <p className="col-span-2 text-sm text-rose-700">{editError}</p>}
+                    </div>
+                  </Section>
+                )}
+
                 <Section title="Штатний розпис">
                   <table className="w-full text-sm">
                     <thead className="border-b border-slate-200 bg-slate-50 text-left text-xs text-slate-500">
@@ -232,6 +606,7 @@ export default function StructurePage() {
                     </tbody>
                   </table>
                 </Section>
+
                 <Section title="QR-код реєстрації">
                   {qrError && <p className="px-4 py-3 text-sm text-rose-700">{qrError}</p>}
                   {!qrError && !qr && <p className="px-4 py-3 text-sm text-slate-500">Завантаження…</p>}
@@ -262,6 +637,31 @@ export default function StructurePage() {
           </div>
         </div>
       </div>
+
+      {showCreate && (
+        <CreateNodeModal
+          nodes={nodes}
+          defaultParentId={selectedId ?? root!.id}
+          onClose={() => setShowCreate(false)}
+          onCreated={() => {
+            setShowCreate(false);
+            loadTree().catch(() => {});
+          }}
+        />
+      )}
+
+      {showTemplate && (
+        <TemplateModal
+          objectNodes={objectNodes}
+          parentNodes={possibleParents}
+          defaultParentId={possibleParents[0]?.id ?? root!.id}
+          onClose={() => setShowTemplate(false)}
+          onCreated={() => {
+            setShowTemplate(false);
+            loadTree().catch(() => {});
+          }}
+        />
+      )}
     </div>
   );
 }
