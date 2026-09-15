@@ -1,69 +1,134 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { ChevronRight, AlertTriangle } from "lucide-react";
+import AppShell from "./components/AppShell";
+
+type MyTask = {
+  taskId: number;
+  employmentId: number;
+  title: string;
+  fullName: string;
+  positionTitle: string;
+  objectName: string;
+  dueAt: string | null;
+  overdue: boolean;
+  tab: "process" | "transfer" | "termination";
+};
+
+type ExpiringCompetency = {
+  personId: number;
+  fullName: string;
+  competencyName: string;
+  validUntil: string;
+};
+
+function fmt(iso: string): string {
+  return new Date(iso).toLocaleDateString("uk-UA", { day: "2-digit", month: "2-digit", year: "numeric" });
+}
+
+function Avatar({ name }: { name: string }) {
+  const parts = name.split(" ");
+  const ini = (parts[0]?.[0] ?? "") + (parts[1]?.[0] ?? "");
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-700 text-xs font-medium text-white">
+      {ini}
+    </span>
+  );
+}
+
+export default function HomePage() {
+  const router = useRouter();
+  const [loading, setLoading] = useState(true);
+  const [myTasks, setMyTasks] = useState<MyTask[]>([]);
+  const [expiring, setExpiring] = useState<ExpiringCompetency[]>([]);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch("/api/me")
+      .then((r) => {
+        if (r.status === 401) {
+          router.push("/login");
+          return null;
+        }
+        return r.json();
+      })
+      .then((me) => {
+        if (!me) return;
+        // Лінійний персонал (тільки SELF-скоуп) веде у власний кабінет,
+        // не в адміністративний дашборд — той самий принцип, що й у /login.
+        const isLineStaff = me.grants.every((g: { scope: string }) => g.scope === "SELF");
+        if (isLineStaff) {
+          router.push("/me");
+          return;
+        }
+        return fetch("/api/me/tasks")
+          .then((r2) => r2.json())
+          .then((data) => {
+            setMyTasks(data.myTasks);
+            setExpiring(data.expiringCompetencies);
+          });
+      })
+      .catch(() => setError("Не вдалося завантажити задачі"))
+      .finally(() => setLoading(false));
+  }, [router]);
+
+  if (loading) return <div className="flex min-h-screen items-center justify-center text-sm text-slate-500">Завантаження…</div>;
+  if (error) return <div className="flex min-h-screen items-center justify-center text-sm text-rose-700">{error}</div>;
+
+  return (
+    <AppShell active="/">
+      <div className="space-y-4">
+        <h2 className="text-xl font-semibold text-slate-900">Мої задачі</h2>
+
+        {myTasks.length === 0 && expiring.length === 0 && (
+          <div className="rounded-md border border-dashed border-slate-300 bg-white px-6 py-12 text-center">
+            <p className="text-sm text-slate-600">Відкритих задач немає.</p>
+          </div>
+        )}
+
+        {myTasks.length > 0 && (
+          <div className="divide-y divide-slate-100 rounded-md border border-slate-200 bg-white">
+            {myTasks.map((t) => (
+              <button
+                key={t.taskId}
+                onClick={() => router.push(`/employees/${t.employmentId}?tab=${t.tab}`)}
+                className="flex w-full items-center gap-4 px-4 py-3 text-left hover:bg-slate-50"
+              >
+                <span className={`h-8 w-1 rounded ${t.overdue ? "bg-rose-500" : "bg-amber-500"}`} />
+                <Avatar name={t.fullName} />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium text-slate-900">{t.title}</p>
+                  <p className="text-xs text-slate-500">
+                    {t.fullName} · {t.positionTitle} · {t.objectName}
+                    {t.dueAt && <span className={t.overdue ? "text-rose-600" : ""}> · до {fmt(t.dueAt)}</span>}
+                  </p>
+                </div>
+                <ChevronRight size={16} className="text-slate-400" />
+              </button>
+            ))}
+          </div>
+        )}
+
+        {expiring.length > 0 && (
+          <div className="rounded-md border border-slate-200 bg-white">
+            <div className="border-b border-slate-100 px-4 py-2 text-sm font-medium text-slate-700">
+              Компетенції, у яких спливає строк <span className="font-normal text-slate-500">— найближчі 2 місяці</span>
+            </div>
+            <div className="divide-y divide-slate-100">
+              {expiring.map((x, i) => (
+                <div key={i} className="flex items-center gap-4 px-4 py-2.5 text-left">
+                  <AlertTriangle size={15} className="text-amber-500" />
+                  <span className="flex-1 text-sm text-slate-800">{x.competencyName}</span>
+                  <span className="text-sm text-slate-500">{x.fullName}</span>
+                  <span className="tabular-nums text-sm text-amber-700">до {fmt(x.validUntil)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </AppShell>
   );
 }

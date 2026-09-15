@@ -30,7 +30,7 @@ export default function LoginPage() {
             // VIEW_EMPLOYEE — жодного гранту з ширшою областю. Такий акаунт
             // веде у власний кабінет, а не в адміністративний список.
             const isLineStaff = !me || me.grants.every((g: { scope: string }) => g.scope === "SELF");
-            router.push(isLineStaff ? "/me" : "/employees");
+            router.push(isLineStaff ? "/me" : "/");
             router.refresh();
           });
       })
