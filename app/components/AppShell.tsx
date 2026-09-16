@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ListChecks, Users, BookOpen, Network, ShieldCheck, CalendarDays } from "lucide-react";
+import { ListChecks, Users, BookOpen, Network, ShieldCheck, CalendarDays, BarChart3 } from "lucide-react";
 
 const NAV = [
   { href: "/", label: "Мої задачі", icon: ListChecks },
@@ -11,6 +11,7 @@ const NAV = [
   { href: "/vacations", label: "Відпустки", icon: CalendarDays },
   { href: "/structure", label: "Структура", icon: Network },
   { href: "/catalog", label: "Довідники", icon: BookOpen },
+  { href: "/analytics", label: "Аналітика", icon: BarChart3, cap: "VIEW_ANALYTICS" },
   { href: "/permissions", label: "Права доступу", icon: ShieldCheck, cap: "MANAGE_PERMISSIONS" },
 ] as const;
 

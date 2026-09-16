@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { X } from "lucide-react";
+import AppShell from "../components/AppShell";
 
 type ProfilesData = { capabilities: string[]; profiles: { id: number; name: string; capabilities: string[] }[] };
 type PositionProfile = { id: number; title: string; level: number };
@@ -347,7 +348,7 @@ export default function PermissionsPage() {
   if (!profilesData || !assignmentsData) return <div className="px-6 py-6 text-sm text-slate-500">Завантаження…</div>;
 
   return (
-    <div className="min-h-screen bg-slate-100 px-6 py-6">
+    <AppShell active="/permissions">
       <div className="space-y-6">
         <h2 className="text-xl font-semibold text-slate-900">Права доступу</h2>
         {error && <p className="text-sm text-rose-700">{error}</p>}
@@ -418,6 +419,6 @@ export default function PermissionsPage() {
           )}
         </div>
       </div>
-    </div>
+    </AppShell>
   );
 }

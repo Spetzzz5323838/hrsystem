@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { AlertTriangle, ArrowLeft, Award, Check, Clock, Eye, Lock, Phone, Star, ThumbsDown, ThumbsUp, X } from "lucide-react";
+import AppShell from "../../components/AppShell";
 
 type CompetencyRow = {
   competencyId: number;
@@ -1576,7 +1577,7 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
   const gapsCount = detail.competencies.filter((c) => c.state !== "valid").length;
 
   return (
-    <div className="min-h-screen bg-slate-100 px-6 py-6">
+    <AppShell active="/employees">
       <div className="space-y-4">
         <Link href="/employees" className="flex w-fit items-center gap-1 text-sm text-slate-500 hover:text-slate-900">
           <ArrowLeft size={15} /> До списку
@@ -2439,7 +2440,7 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
                   <label className="block text-xs text-slate-600">Тип</label>
                   <select value={vacType} onChange={(e) => setVacType(e.target.value as "ANNUAL" | "UNPAID")} className="rounded border border-slate-300 px-2 py-1.5 text-sm">
                     <option value="ANNUAL">Щорічна</option>
-                    <option value="UNPAID">Без збереження зарплати</option>
+                    <option value="UNPAID">За свій рахунок</option>
                   </select>
                 </div>
                 <div className="space-y-1">
@@ -2466,7 +2467,7 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
                   <div key={v.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-medium text-slate-900">
-                        {v.type === "ANNUAL" ? "Щорічна" : "Без збереження зарплати"}: {new Date(v.fromDate).toLocaleDateString("uk-UA")} —{" "}
+                        {v.type === "ANNUAL" ? "Щорічна" : "За свій рахунок"}: {new Date(v.fromDate).toLocaleDateString("uk-UA")} —{" "}
                         {new Date(v.toDate).toLocaleDateString("uk-UA")}
                       </p>
                       <p className="text-xs text-slate-500">
@@ -2674,6 +2675,6 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
           </Section>
         )}
       </div>
-    </div>
+    </AppShell>
   );
 }

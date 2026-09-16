@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import AppShell from "../components/AppShell";
 
 type ProfileListItem = {
   id: number;
@@ -508,7 +509,7 @@ export default function CatalogPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-100 px-6 py-6">
+    <AppShell active="/catalog">
       <div className="space-y-4">
         <h2 className="text-xl font-semibold text-slate-900">Довідники</h2>
 
@@ -1038,6 +1039,6 @@ export default function CatalogPage() {
           </Section>
         )}
       </div>
-    </div>
+    </AppShell>
   );
 }

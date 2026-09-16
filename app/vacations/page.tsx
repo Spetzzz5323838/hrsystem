@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { AlertTriangle } from "lucide-react";
+import AppShell from "../components/AppShell";
 
 type PendingRow = {
   id: number;
@@ -23,7 +24,7 @@ type EmployeeRow = { employmentId: number; fullName: string; positionTitle: stri
 
 type Data = { objects: { id: number; name: string }[]; employees: EmployeeRow[]; pending: PendingRow[]; calendar: CalendarRow[] };
 
-const TYPE_LABELS: Record<string, string> = { ANNUAL: "Щорічна", UNPAID: "Без збереження зарплати" };
+const TYPE_LABELS: Record<string, string> = { ANNUAL: "Щорічна", UNPAID: "За свій рахунок" };
 
 function fmt(iso: string): string {
   return new Date(iso).toLocaleDateString("uk-UA", { day: "2-digit", month: "2-digit" });
@@ -107,7 +108,7 @@ export default function VacationsPage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-100 px-6 py-6">
+    <AppShell active="/vacations">
       <div className="space-y-4">
         <div className="flex items-baseline justify-between">
           <h2 className="text-xl font-semibold text-slate-900">Відпустки</h2>
@@ -224,6 +225,6 @@ export default function VacationsPage() {
           </div>
         </Section>
       </div>
-    </div>
+    </AppShell>
   );
 }

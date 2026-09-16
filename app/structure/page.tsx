@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Building2, ChevronDown, ChevronRight, Circle, Network } from "lucide-react";
+import AppShell from "../components/AppShell";
 
 type OrgNode = {
   id: number;
@@ -449,7 +450,7 @@ export default function StructurePage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-100 px-6 py-6">
+    <AppShell active="/structure">
       <div className="space-y-4">
         <div className="flex items-baseline justify-between">
           <h2 className="text-xl font-semibold text-slate-900">Структура компанії</h2>
@@ -662,6 +663,6 @@ export default function StructurePage() {
           }}
         />
       )}
-    </div>
+    </AppShell>
   );
 }

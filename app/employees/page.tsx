@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Search } from "lucide-react";
+import AppShell from "../components/AppShell";
 
 type EmployeeRow = {
   employmentId: number;
@@ -145,7 +146,7 @@ export default function EmployeesPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-100 px-6 py-6">
+    <AppShell active="/employees">
       <div className="space-y-4">
         <div className="flex items-baseline justify-between">
           <h2 className="text-xl font-semibold text-slate-900">Працівники</h2>
@@ -310,6 +311,6 @@ export default function EmployeesPage() {
           </table>
         </div>
       </div>
-    </div>
+    </AppShell>
   );
 }

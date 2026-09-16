@@ -5,7 +5,7 @@ import { hasAccess } from "./access";
 import { queueTelegramMessage } from "./notifications";
 import { Capability, EmploymentStatus, OrgNodeType, VacationStatus, VacationType } from "../generated/prisma/client";
 
-const TYPE_LABELS: Record<string, string> = { ANNUAL: "Щорічна", UNPAID: "Без збереження зарплати" };
+const TYPE_LABELS: Record<string, string> = { ANNUAL: "Щорічна", UNPAID: "За свій рахунок" };
 
 function fmtDate(d: Date): string {
   return d.toLocaleDateString("uk-UA", { day: "2-digit", month: "2-digit", year: "numeric" });

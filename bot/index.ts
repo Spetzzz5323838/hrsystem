@@ -173,7 +173,7 @@ bot.command("vacation", async (ctx) => {
   }
 
   vacationSessions.set(ctx.from.id, { step: "type", employmentId: employment.id });
-  await ctx.reply("Яка відпустка?\n\n1 — Щорічна\n2 — Без збереження зарплати\n\nВведіть 1 або 2.");
+  await ctx.reply("Яка відпустка?\n\n1 — Щорічна\n2 — За свій рахунок\n\nВведіть 1 або 2.");
 });
 
 bot.on("message:text", async (ctx) => {
@@ -220,7 +220,7 @@ bot.on("message:text", async (ctx) => {
       vacState.step = "confirm";
 
       const days = Math.round((date.getTime() - vacState.fromDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-      const typeLabel = vacState.type === VacationType.ANNUAL ? "Щорічна" : "Без збереження зарплати";
+      const typeLabel = vacState.type === VacationType.ANNUAL ? "Щорічна" : "За свій рахунок";
       const warning = conflict.conflictNote ? `\n\n⚠ ${conflict.conflictNote}` : "";
       await ctx.reply(
         `Перевірте заявку:\n${typeLabel}, ${ctx.message.text.trim()} — ${days} дн.${warning}\n\nНадіслати? Введіть «так» або «ні».`,
