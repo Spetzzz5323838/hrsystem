@@ -1,6 +1,6 @@
 import { Bot, Keyboard } from "grammy";
 import { prisma } from "../lib/prisma";
-import { resolveAssignee, confirmReadyForAttestation } from "../lib/onboarding";
+import { resolveAssignee, confirmReadyForAttestation, completeTask, getMyPendingEmployeeMarkTasks } from "../lib/onboarding";
 import { queueTelegramMessage, registerTelegramMessageWorker } from "../lib/notifications";
 import { getBoss } from "../lib/queue";
 import { checkSlaEscalations } from "../lib/sla";
@@ -111,7 +111,8 @@ bot.command("start", async (ctx) => {
     await ctx.reply(
       "Вітаю! Це бот системи управління персоналом мережі «Коровай». Щоб зареєструватись, відскануйте QR-код на вашому об'єкті.\n\n" +
         "Якщо ви вже працюєте в компанії й хочете отримувати сповіщення сюди — напишіть /link.\n" +
-        "Щоб подати заявку на відпустку — напишіть /vacation.",
+        "Щоб подати заявку на відпустку — напишіть /vacation.\n" +
+        "Щоб побачити задачі, що очікують вашої дії — напишіть /tasks.",
     );
     return;
   }
@@ -158,6 +159,28 @@ bot.command("link", async (ctx) => {
     "Щоб прив'язати Telegram до вашого акаунта в системі, поділіться номером телефону.\n\nТоркніться поля вводу тексту внизу — з'явиться кнопка «Поділитися номером телефону».",
     { reply_markup: new Keyboard().requestContact("Поділитися номером телефону").resized().oneTime() },
   );
+});
+
+bot.command("tasks", async (ctx) => {
+  if (!ctx.from) return;
+
+  const person = await prisma.person.findUnique({ where: { telegramId: BigInt(ctx.from.id) } });
+  if (!person) {
+    await ctx.reply("Спершу прив'яжіть Telegram до вашого акаунта — напишіть /link.");
+    return;
+  }
+
+  const tasks = await getMyPendingEmployeeMarkTasks(person.id);
+  if (!tasks.length) {
+    await ctx.reply("Наразі немає задач, що очікують вашої дії.");
+    return;
+  }
+
+  for (const t of tasks) {
+    await ctx.reply(`Потрібна ваша дія: «${t.title}».`, {
+      reply_markup: { inline_keyboard: [[{ text: "Виконано", callback_data: `employee_task_done:${t.taskId}` }]] },
+    });
+  }
 });
 
 bot.command("vacation", async (ctx) => {
@@ -447,6 +470,33 @@ bot.callbackQuery(/^ready_for_attestation:(\d+)$/, async (ctx) => {
   await ctx.answerCallbackQuery({ text: "Підтверджено!" });
   await ctx.editMessageReplyMarkup(undefined).catch(() => {});
   await ctx.reply("Готовність до атестації підтверджено. Адміністратор сповіщений.");
+});
+
+// ── Пункти чек-ліста з responsibleRole=EMPLOYEE (docs plan-v1.md §6.1,
+// напр. "Згода на обробку персональних даних") — виконує сам працівник,
+// кнопка приходить push-сповіщенням (lib/onboarding.ts::notifyEmployeeMarkTask)
+// або через /tasks, якщо push пропущено.
+bot.callbackQuery(/^employee_task_done:(\d+)$/, async (ctx) => {
+  const taskId = Number(ctx.match[1]);
+  const task = await prisma.task.findUnique({
+    where: { id: taskId },
+    include: { assignee: { include: { person: true } }, itemTemplate: true },
+  });
+
+  if (!task || !task.assignee || task.assignee.person.telegramId !== BigInt(ctx.from.id)) {
+    await ctx.answerCallbackQuery({ text: "Це не ваша задача", show_alert: true });
+    return;
+  }
+
+  const result = await completeTask(taskId, task.assignee.id);
+  if (!result.ok) {
+    await ctx.answerCallbackQuery({ text: result.error, show_alert: true });
+    return;
+  }
+
+  await ctx.answerCallbackQuery({ text: "Дякуємо, зафіксовано!" });
+  await ctx.editMessageReplyMarkup(undefined).catch(() => {});
+  await ctx.reply(`Позначено виконаним: «${task.itemTemplate.title}».`);
 });
 
 bot.catch((err) => {

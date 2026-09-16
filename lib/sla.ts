@@ -2,7 +2,7 @@ import { prisma } from "./prisma";
 import { getInstanceTasks } from "./onboarding";
 import { queueTelegramMessage } from "./notifications";
 import { findNearestHead } from "./permissions";
-import { TaskStatus } from "../generated/prisma/client";
+import { TaskStatus, Role, ActionType } from "../generated/prisma/client";
 
 const ESCALATION_DELAY_MS = 24 * 60 * 60 * 1000;
 
@@ -37,9 +37,19 @@ export async function checkSlaEscalations(): Promise<void> {
     if (blockedTaskIds.has(task.id)) continue;
 
     if (task.assignee?.person.telegramId) {
+      // Для EMPLOYEE-MARK пунктів (докс §6.1, напр. "Згода на обробку
+      // персональних даних") додаємо кнопку сюди ж — на випадок, якщо
+      // push при розблокуванні (lib/onboarding.ts::notifyEmployeeMarkTask)
+      // не дійшов (бот не був запущений тощо), нагадування лишається
+      // єдиним шансом реально виконати пункт, не лише дізнатись про нього.
+      const replyMarkup =
+        task.itemTemplate.responsibleRole === Role.EMPLOYEE && task.itemTemplate.actionType === ActionType.MARK
+          ? { inline_keyboard: [[{ text: "Виконано", callback_data: `employee_task_done:${task.id}` }]] }
+          : undefined;
       await queueTelegramMessage(
         task.assignee.person.telegramId,
         `Протерміновано: «${task.itemTemplate.title}». Норматив минув ${task.dueAt?.toLocaleString("uk-UA")}.`,
+        replyMarkup,
       );
     }
     await prisma.task.update({ where: { id: task.id }, data: { overdueNotifiedAt: now } });

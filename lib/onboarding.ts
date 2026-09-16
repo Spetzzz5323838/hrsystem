@@ -22,6 +22,32 @@ function addMonths(date: Date, months: number): Date {
 }
 
 /**
+ * Пункти з `responsibleRole: EMPLOYEE` (напр. "Згода на обробку
+ * персональних даних") призначаються самому працівнику — а він працює
+ * тільки через бот (архітектурне рішення №1). Без цього сповіщення з
+ * кнопкою пункт нікому й нема на чому виконати: у веб-адмінці кнопка
+ * "виконано" видима лише призначеному виконавцю, а кабінет `/me` показує
+ * чек-лист тільки на читання. Стосується лише MARK — TEST-пункти
+ * ("Тест «Каса»" тощо) з самооцінюванням через бот навмисно не займали
+ * тут, це окреме питання.
+ */
+async function notifyEmployeeMarkTask(task: {
+  id: number;
+  assigneeId: number | null;
+  itemTemplate: { responsibleRole: Role | null; actionType: ActionType; title: string };
+}): Promise<void> {
+  if (task.itemTemplate.responsibleRole !== Role.EMPLOYEE || task.itemTemplate.actionType !== ActionType.MARK) return;
+  if (!task.assigneeId) return;
+
+  const assignee = await prisma.employment.findUnique({ where: { id: task.assigneeId }, include: { person: true } });
+  if (!assignee?.person.telegramId) return;
+
+  await queueTelegramMessage(assignee.person.telegramId, `Потрібна ваша дія: «${task.itemTemplate.title}».`, {
+    inline_keyboard: [[{ text: "Виконано", callback_data: `employee_task_done:${task.id}` }]],
+  });
+}
+
+/**
  * Резолвінг виконавця за роллю й областю: хто зараз має цю роль
  * (systemRole посади або функціональна RoleAssignment) і чия область
  * покриває вузол працівника. Якщо кандидатів декілька — береться той,
@@ -153,7 +179,49 @@ export async function startOnboarding(employmentId: number): Promise<{ instanceI
     });
   }
 
+  const firstOpen = await prisma.task.findFirst({
+    where: { instanceId: instance.id, status: TaskStatus.PENDING, itemTemplate: { isBlocking: true } },
+    include: { itemTemplate: true },
+    orderBy: { itemTemplate: { order: "asc" } },
+  });
+  if (firstOpen) await notifyEmployeeMarkTask(firstOpen);
+
   return { instanceId: instance.id, alreadyExisted: false };
+}
+
+/**
+ * Резерв на випадок пропущеного push-сповіщення (напр. бот був не
+ * запущений у момент розблокування пункту) — команда `/tasks` у боті
+ * показує ті самі MARK-пункти, призначені особисто працівнику, без
+ * очікування на нове сповіщення.
+ */
+export async function getMyPendingEmployeeMarkTasks(personId: number): Promise<{ taskId: number; title: string }[]> {
+  const employmentIds = (
+    await prisma.employment.findMany({ where: { personId, status: { not: EmploymentStatus.TERMINATED } }, select: { id: true } })
+  ).map((e) => e.id);
+  if (!employmentIds.length) return [];
+
+  const tasks = await prisma.task.findMany({
+    where: {
+      assigneeId: { in: employmentIds },
+      status: TaskStatus.PENDING,
+      itemTemplate: { responsibleRole: Role.EMPLOYEE, actionType: ActionType.MARK },
+    },
+    include: { itemTemplate: true },
+  });
+
+  const viewsByInstance = new Map<number, TaskView[]>();
+  const result: { taskId: number; title: string }[] = [];
+  for (const t of tasks) {
+    let views = viewsByInstance.get(t.instanceId);
+    if (!views) {
+      views = await getInstanceTasks(t.instanceId);
+      viewsByInstance.set(t.instanceId, views);
+    }
+    const view = views.find((v) => v.taskId === t.id);
+    if (view && !view.blocked) result.push({ taskId: t.id, title: t.itemTemplate.title });
+  }
+  return result;
 }
 
 export type TaskView = {
@@ -325,6 +393,7 @@ export async function completeTask(
         data: { dueAt: new Date(now.getTime() + nextBlocking.itemTemplate.slaHours * 60 * 60 * 1000) },
       });
     }
+    if (nextBlocking) await notifyEmployeeMarkTask(nextBlocking);
   }
 
   // Стан-машина онбордингу (docs plan-v1.md §7). Прив'язка до назв
