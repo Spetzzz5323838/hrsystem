@@ -344,8 +344,20 @@ export default function PermissionsPage() {
       .catch((e) => setSimError(e.message));
   };
 
-  if (error && !profilesData) return <div className="px-6 py-6 text-sm text-rose-700">{error}</div>;
-  if (!profilesData || !assignmentsData) return <div className="px-6 py-6 text-sm text-slate-500">Завантаження…</div>;
+  if (error && !profilesData) {
+    return (
+      <AppShell active="/permissions">
+        <div className="text-sm text-rose-700">{error}</div>
+      </AppShell>
+    );
+  }
+  if (!profilesData || !assignmentsData) {
+    return (
+      <AppShell active="/permissions">
+        <div className="text-sm text-slate-500">Завантаження…</div>
+      </AppShell>
+    );
+  }
 
   return (
     <AppShell active="/permissions">

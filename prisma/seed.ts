@@ -361,6 +361,7 @@ const ACCESS_PROFILES: AccessProfileSeed[] = [
       // OWN_OBJECT область для них — сам факт наявності APPROVE_VACATION тут
       // ще не дає погоджувати ескальовані заявки об'єктному адміну.
       Capability.APPROVE_VACATION,
+      Capability.PRINT_BADGE,
     ],
   },
   { name: "Аналітика", capabilities: [Capability.VIEW_ANALYTICS] },
@@ -1248,6 +1249,121 @@ async function seedEquipment() {
   }
 }
 
+// Тексти сповіщень (docs plan-v1.md §8: "Шаблони повідомлень — у БД, не в
+// коді"). Ключ — стабільний ідентифікатор з коду. `{{плейсхолдери}}`
+// підставляються в lib/notificationTemplates.ts::sendNotification.
+const notificationTemplates: { key: string; description: string; text: string }[] = [
+  {
+    key: "onboarding.employeeMarkTaskReminder",
+    description: "Нагадування працівнику виконати пункт чек-ліста (кнопка «Виконано»)",
+    text: "Потрібна ваша дія: «{{taskTitle}}».",
+  },
+  {
+    key: "onboarding.welcomeMaterials",
+    description: "Привітання з переліком навчальних матеріалів на старті онбордингу",
+    text: "Ласкаво просимо! Ваші навчальні матеріали для початку роботи:\n\n{{materialsList}}",
+  },
+  {
+    key: "onboarding.profileActivated",
+    description: "Активація профілю — дані для входу в кабінет",
+    text: "Ваш профіль активовано. Зверніться до оператора 1С і бухгалтерії для оформлення.\n\nДані для входу в особистий кабінет (профіль, матеріали, прогрес навчання):\nТелефон: {{phone}}\nПароль: {{password}}",
+  },
+  {
+    key: "onboarding.onecTaskAssigned",
+    description: "Оператору 1С — нова задача реєстрації",
+    text: "Нова задача: реєстрація в 1С для {{fullName}}.",
+  },
+  {
+    key: "onboarding.accountantTaskAssigned",
+    description: "Бухгалтеру — нова задача прийому документів",
+    text: "Нова задача: прийом документів для {{fullName}}.",
+  },
+  {
+    key: "onboarding.paperworkDoneAdmin",
+    description: "Адміністратору об'єкта — оформлення прийому завершено",
+    text: "Оформлення {{fullName}} завершено — можна розпочинати навчання.",
+  },
+  {
+    key: "onboarding.paperworkDoneCurator",
+    description: "Куратору — оформлення прийому завершено",
+    text: "Оформлення {{fullName}} завершено — можна розпочинати стажування.",
+  },
+  {
+    key: "onboarding.internshipDoneConfirmPrompt",
+    description: "Працівнику — підтвердити готовність до атестації (кнопка)",
+    text: "Стажування завершено. Якщо готові складати атестацію — підтвердіть.",
+  },
+  {
+    key: "onboarding.readyForAttestationAdmin",
+    description: "Адміністратору об'єкта — працівник готовий до атестації",
+    text: "{{fullName}} готовий(-а) до атестації.",
+  },
+  {
+    key: "onboarding.curatorAssigned",
+    description: "Куратору — призначено нового підопічного",
+    text: "У вас новий підопічний: {{fullName}} ({{positionTitle}}). Чек-ліст онбордингу — в системі.",
+  },
+  {
+    key: "sla.overdueReminder",
+    description: "Виконавцю — пункт чек-ліста протерміновано",
+    text: "Протерміновано: «{{taskTitle}}». Норматив минув {{dueAt}}.",
+  },
+  {
+    key: "sla.escalation",
+    description: "Керівнику вузла — ескалація протермінованого пункту понад добу",
+    text: "Ескалація: «{{taskTitle}}» для {{fullName}} протерміновано понад добу.",
+  },
+  {
+    key: "vacation.newRequest",
+    description: "Погоджувачу — нова заявка на відпустку",
+    text: "Заявка на відпустку: {{fullName}}, {{type}}, {{period}}.{{note}}\n\nПогодьте або відхиліть у системі.",
+  },
+  {
+    key: "vacation.approved",
+    description: "Працівнику — заявку на відпустку погоджено",
+    text: "Вашу заявку на відпустку ({{period}}) погоджено.",
+  },
+  {
+    key: "vacation.rejected",
+    description: "Працівнику — заявку на відпустку відхилено",
+    text: "Вашу заявку на відпустку ({{period}}) відхилено.{{reasonSuffix}}",
+  },
+  {
+    key: "review.newQuarterlyReview",
+    description: "Працівнику — нова квартальна оцінка готова до ознайомлення",
+    text: "У вас квартальна оцінка за {{quarter}} квартал {{year}}. Обговоріть її з керівником, якщо ще не встигли, і підтвердьте ознайомлення нижче.",
+  },
+  {
+    key: "attestation.failedCurator",
+    description: "Куратору — атестація підопічного не складена",
+    text: "Атестація {{fullName}} не складена (спроба {{attemptNumber}}, {{percent}}% при потрібних {{threshold}}%).\n\n{{sections}}",
+  },
+  {
+    key: "attestation.thirdFailEscalation",
+    description: "Директору кластера — третій провал атестації поспіль",
+    text: "{{fullName}} провалив(-ла) атестацію втретє ({{percent}}%). Потрібне рішення.",
+  },
+  {
+    key: "bot.newHireRequest",
+    description: "Адміністратору об'єкта — нова заявка на реєстрацію через QR",
+    text: "Нова заявка на реєстрацію: {{fullName}} ({{objectName}}). Перевірте розділ «Нові заявки» в системі.",
+  },
+  {
+    key: "auth.loginConfirmation",
+    description: "Підтвердження входу через 2FA (кнопка)",
+    text: "Вхід у систему для {{fullName}}. Якщо це ви — підтвердіть кнопкою нижче.",
+  },
+];
+
+/** Тільки create-if-missing — щоб повторний seed не переписував тексти, які сисадмін уже відредагував через /catalog. */
+async function seedNotificationTemplates() {
+  for (const t of notificationTemplates) {
+    const existing = await prisma.notificationTemplate.findUnique({ where: { key: t.key } });
+    if (existing) continue;
+    await prisma.notificationTemplate.create({ data: t });
+  }
+}
+
 async function main() {
   console.log("Дерево об'єктів...");
   await seedOrgTree();
@@ -1308,6 +1424,9 @@ async function main() {
 
   console.log("Обладнання...");
   await seedEquipment();
+
+  console.log("Шаблони сповіщень...");
+  await seedNotificationTemplates();
 
   console.log("Готово.");
 }

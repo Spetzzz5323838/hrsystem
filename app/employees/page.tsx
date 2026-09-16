@@ -138,11 +138,19 @@ export default function EmployeesPage() {
   };
 
   if (error) {
-    return <div className="px-6 py-6 text-sm text-rose-700">{error}</div>;
+    return (
+      <AppShell active="/employees">
+        <div className="text-sm text-rose-700">{error}</div>
+      </AppShell>
+    );
   }
 
   if (!data) {
-    return <div className="px-6 py-6 text-sm text-slate-500">Завантаження…</div>;
+    return (
+      <AppShell active="/employees">
+        <div className="text-sm text-slate-500">Завантаження…</div>
+      </AppShell>
+    );
   }
 
   return (

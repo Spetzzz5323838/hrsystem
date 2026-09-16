@@ -73,7 +73,7 @@ function Section({ title, right, children }: { title: string; right?: React.Reac
 }
 
 export default function CatalogPage() {
-  const [tab, setTab] = useState<"pos" | "comp" | "mat">("pos");
+  const [tab, setTab] = useState<"pos" | "comp" | "mat" | "notif">("pos");
   const [error, setError] = useState<string | null>(null);
   const [canEdit, setCanEdit] = useState(false);
   const [canEditTemplates, setCanEditTemplates] = useState(false);
@@ -185,6 +185,63 @@ export default function CatalogPage() {
     loadReviewWeights();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId]);
+
+  // ── Шаблони сповіщень і журнал відправлень ──
+  type NotificationTemplateRow = { id: number; key: string; description: string; text: string };
+  type NotificationLogRow = {
+    id: number;
+    recipientName: string;
+    templateKey: string | null;
+    text: string;
+    status: "QUEUED" | "SENT" | "FAILED";
+    error: string | null;
+    createdAt: string;
+    sentAt: string | null;
+  };
+  const [notifTemplates, setNotifTemplates] = useState<NotificationTemplateRow[] | null>(null);
+  const [notifLog, setNotifLog] = useState<NotificationLogRow[] | null>(null);
+  const [notifError, setNotifError] = useState<string | null>(null);
+
+  const loadNotifTemplates = () => {
+    fetch("/api/notification-templates")
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("Не вдалося завантажити шаблони"))))
+      .then(setNotifTemplates)
+      .catch((e) => setNotifError(e.message));
+  };
+  const loadNotifLog = () => {
+    fetch("/api/notifications?limit=50")
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("Не вдалося завантажити журнал"))))
+      .then(setNotifLog)
+      .catch((e) => setNotifError(e.message));
+  };
+
+  useEffect(() => {
+    if (tab === "notif" && canEditTemplates && !notifTemplates) {
+      loadNotifTemplates();
+      loadNotifLog();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, canEditTemplates]);
+
+  const updateNotifTemplateText = (id: number, text: string) => {
+    fetch(`/api/notification-templates/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    })
+      .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
+      .then(({ ok, body }) => {
+        if (!ok) throw new Error(body.error ?? "Не вдалося зберегти шаблон");
+        setNotifError(null);
+      })
+      .catch((e) => setNotifError(e.message));
+  };
+
+  const NOTIF_STATUS_LABELS: Record<string, { label: string; cls: string }> = {
+    SENT: { label: "відправлено", cls: "bg-emerald-50 text-emerald-700" },
+    QUEUED: { label: "у черзі", cls: "bg-slate-100 text-slate-600" },
+    FAILED: { label: "помилка", cls: "bg-rose-50 text-rose-700" },
+  };
 
   // ── Компетенції: додавання/редагування/видалення ──
   const [compFormOpen, setCompFormOpen] = useState(false);
@@ -501,11 +558,19 @@ export default function CatalogPage() {
   };
 
   if (error) {
-    return <div className="px-6 py-6 text-sm text-rose-700">{error}</div>;
+    return (
+      <AppShell active="/catalog">
+        <div className="text-sm text-rose-700">{error}</div>
+      </AppShell>
+    );
   }
 
   if (!profiles || !competencies || !materials) {
-    return <div className="px-6 py-6 text-sm text-slate-500">Завантаження…</div>;
+    return (
+      <AppShell active="/catalog">
+        <div className="text-sm text-slate-500">Завантаження…</div>
+      </AppShell>
+    );
   }
 
   return (
@@ -519,6 +584,7 @@ export default function CatalogPage() {
               ["pos", "Профілі посад"],
               ["comp", "Компетенції"],
               ["mat", "Матеріали"],
+              ...(canEditTemplates ? ([["notif", "Сповіщення"]] as const) : ([] as const)),
             ] as const
           ).map(([k, l]) => (
             <button
@@ -1037,6 +1103,75 @@ export default function CatalogPage() {
               </tbody>
             </table>
           </Section>
+        )}
+
+        {tab === "notif" && canEditTemplates && (
+          <div className="space-y-4">
+            {notifError && <p className="text-sm text-rose-700">{notifError}</p>}
+
+            <Section title="Шаблони сповіщень" right={<span className="text-xs text-slate-500">{notifTemplates?.length ?? 0} шаблонів</span>}>
+              {!notifTemplates && <p className="px-4 py-6 text-sm text-slate-500">Завантаження…</p>}
+              {notifTemplates && (
+                <div className="divide-y divide-slate-100">
+                  {notifTemplates.map((t) => (
+                    <div key={t.id} className="px-4 py-3">
+                      <div className="flex items-baseline justify-between gap-2">
+                        <p className="text-sm font-medium text-slate-900">{t.description}</p>
+                        <code className="shrink-0 text-xs text-slate-400">{t.key}</code>
+                      </div>
+                      <textarea
+                        key={t.id}
+                        defaultValue={t.text}
+                        rows={3}
+                        onBlur={(e) => e.target.value !== t.text && updateNotifTemplateText(t.id, e.target.value)}
+                        className="mt-1.5 w-full rounded border border-slate-300 px-2 py-1.5 font-mono text-xs focus:border-slate-800 focus:outline-none"
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Section>
+
+            <Section title="Журнал відправлень" right={<span className="text-xs text-slate-500">останні {notifLog?.length ?? 0}</span>}>
+              {!notifLog && <p className="px-4 py-6 text-sm text-slate-500">Завантаження…</p>}
+              {notifLog && !notifLog.length && <p className="px-4 py-6 text-sm text-slate-500">Ще нічого не надсилалось.</p>}
+              {notifLog && !!notifLog.length && (
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-slate-200 bg-slate-50 text-slate-500">
+                      <th className="px-4 py-2 text-left font-medium">Кому</th>
+                      <th className="px-3 py-2 text-left font-medium">Шаблон</th>
+                      <th className="px-3 py-2 text-left font-medium">Текст</th>
+                      <th className="px-3 py-2 text-left font-medium">Статус</th>
+                      <th className="px-3 py-2 text-right font-medium">Коли</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50">
+                    {notifLog.map((n) => {
+                      const meta = NOTIF_STATUS_LABELS[n.status] ?? { label: n.status, cls: "bg-slate-100 text-slate-600" };
+                      return (
+                        <tr key={n.id}>
+                          <td className="px-4 py-2 text-slate-700">{n.recipientName}</td>
+                          <td className="px-3 py-2 text-slate-500">{n.templateKey ?? "—"}</td>
+                          <td className="max-w-xs truncate px-3 py-2 text-slate-500" title={n.text}>
+                            {n.text}
+                          </td>
+                          <td className="px-3 py-2">
+                            <span className={`rounded px-1.5 py-0.5 font-medium ${meta.cls}`} title={n.error ?? undefined}>
+                              {meta.label}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2 text-right text-slate-400">
+                            {new Date(n.sentAt ?? n.createdAt).toLocaleString("uk-UA", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </Section>
+          </div>
         )}
       </div>
     </AppShell>

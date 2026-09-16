@@ -2,7 +2,7 @@ import { prisma } from "./prisma";
 import { logAudit } from "./audit";
 import { getEffectiveGrants, findAncestorPath, findNearestHead, companyRootPath } from "./permissions";
 import { hasAccess } from "./access";
-import { queueTelegramMessage } from "./notifications";
+import { sendNotification } from "./notificationTemplates";
 import { Capability, EmploymentStatus, OrgNodeType, VacationStatus, VacationType } from "../generated/prisma/client";
 
 const TYPE_LABELS: Record<string, string> = { ANNUAL: "Щорічна", UNPAID: "За свій рахунок" };
@@ -145,13 +145,15 @@ export async function createVacationRequest(
   const notifyTargetId = await resolveVacationNotifyTarget(employmentId, conflict);
   if (notifyTargetId) {
     const target = await prisma.employment.findUnique({ where: { id: notifyTargetId }, include: { person: true } });
-    if (target?.person.telegramId) {
+    if (target) {
       const period = `${fmtDate(input.fromDate)} — ${fmtDate(input.toDate)}`;
       const note = conflict.conflictNote ? `\n⚠ ${conflict.conflictNote}` : "";
-      await queueTelegramMessage(
-        target.person.telegramId,
-        `Заявка на відпустку: ${request.employment.person.fullName}, ${TYPE_LABELS[input.type]}, ${period}.${note}\n\nПогодьте або відхиліть у системі.`,
-      );
+      await sendNotification(target.personId, "vacation.newRequest", {
+        fullName: request.employment.person.fullName,
+        type: TYPE_LABELS[input.type],
+        period,
+        note,
+      });
     }
   }
 
@@ -221,13 +223,14 @@ export async function decideVacationRequest(
 
   // docs v1.2 §4.1: "працівник отримує підтвердження в Telegram" — незалежно
   // від того, чи рішення прийняте в боті, чи у вебі.
-  if (request.employment.person.telegramId) {
-    const period = `${fmtDate(request.fromDate)} — ${fmtDate(request.toDate)}`;
-    const text =
-      decision === "APPROVED"
-        ? `Вашу заявку на відпустку (${period}) погоджено.`
-        : `Вашу заявку на відпустку (${period}) відхилено.${rejectReason ? ` Причина: ${rejectReason}` : ""}`;
-    await queueTelegramMessage(request.employment.person.telegramId, text);
+  const period = `${fmtDate(request.fromDate)} — ${fmtDate(request.toDate)}`;
+  if (decision === "APPROVED") {
+    await sendNotification(request.employment.personId, "vacation.approved", { period });
+  } else {
+    await sendNotification(request.employment.personId, "vacation.rejected", {
+      period,
+      reasonSuffix: rejectReason ? ` Причина: ${rejectReason}` : "",
+    });
   }
 
   return { ok: true };

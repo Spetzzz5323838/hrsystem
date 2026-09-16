@@ -1,7 +1,7 @@
 import { prisma } from "./prisma";
 import { hasAccess } from "./access";
 import { logAudit } from "./audit";
-import { queueTelegramMessage } from "./notifications";
+import { sendNotification } from "./notificationTemplates";
 import { getCompetencyDelta } from "./competencies";
 import { hashPassword, generateCabinetPassword } from "./auth";
 import { checkProfileClosedBadge, checkBeyondProfileBadge, checkFastStartBadge, checkMentorBadge } from "./rating";
@@ -40,9 +40,9 @@ async function notifyEmployeeMarkTask(task: {
   if (!task.assigneeId) return;
 
   const assignee = await prisma.employment.findUnique({ where: { id: task.assigneeId }, include: { person: true } });
-  if (!assignee?.person.telegramId) return;
+  if (!assignee) return;
 
-  await queueTelegramMessage(assignee.person.telegramId, `Потрібна ваша дія: «${task.itemTemplate.title}».`, {
+  await sendNotification(assignee.personId, "onboarding.employeeMarkTaskReminder", { taskTitle: task.itemTemplate.title }, {
     inline_keyboard: [[{ text: "Виконано", callback_data: `employee_task_done:${task.id}` }]],
   });
 }
@@ -105,9 +105,6 @@ export async function resolveAssignee(role: Role, targetOrgNodePath: string): Pr
  * telegramId (окрема команда /link) або матеріалів немає.
  */
 async function sendOnboardingMaterials(employment: { personId: number; staffUnit: { positionProfileId: number } }): Promise<void> {
-  const person = await prisma.person.findUnique({ where: { id: employment.personId } });
-  if (!person?.telegramId) return;
-
   const materials = await prisma.material.findMany({
     where: {
       sendViaBot: true,
@@ -118,7 +115,7 @@ async function sendOnboardingMaterials(employment: { personId: number; staffUnit
   if (!materials.length) return;
 
   const lines = materials.map((m) => `• ${m.title}${m.url ? ` — ${m.url}` : ""}`);
-  await queueTelegramMessage(person.telegramId, `Ласкаво просимо! Ваші навчальні матеріали для початку роботи:\n\n${lines.join("\n")}`);
+  await sendNotification(employment.personId, "onboarding.welcomeMaterials", { materialsList: lines.join("\n") });
 }
 
 export async function startOnboarding(employmentId: number): Promise<{ instanceId: number; alreadyExisted: boolean }> {
@@ -416,28 +413,21 @@ export async function completeTask(
     const cabinetPassword = generateCabinetPassword();
     await prisma.person.update({ where: { id: employment.personId }, data: { passwordHash: await hashPassword(cabinetPassword) } });
 
-    if (employment.person.telegramId) {
-      await queueTelegramMessage(
-        employment.person.telegramId,
-        "Ваш профіль активовано. Зверніться до оператора 1С і бухгалтерії для оформлення.\n\n" +
-          "Дані для входу в особистий кабінет (профіль, матеріали, прогрес навчання):\n" +
-          `Телефон: ${employment.person.phone}\n` +
-          `Пароль: ${cabinetPassword}`,
-      );
-    }
+    await sendNotification(employment.personId, "onboarding.profileActivated", { phone: employment.person.phone, password: cabinetPassword });
+
     const onecTask = await prisma.task.findFirst({
       where: { instanceId: task.instanceId, itemTemplate: { title: "Реєстрація в 1С, генерація пароля" } },
       include: { assignee: { include: { person: true } } },
     });
-    if (onecTask?.assignee?.person.telegramId) {
-      await queueTelegramMessage(onecTask.assignee.person.telegramId, `Нова задача: реєстрація в 1С для ${employment.person.fullName}.`);
+    if (onecTask?.assignee) {
+      await sendNotification(onecTask.assignee.personId, "onboarding.onecTaskAssigned", { fullName: employment.person.fullName });
     }
     const accountantTask = await prisma.task.findFirst({
       where: { instanceId: task.instanceId, itemTemplate: { title: "Прийом і сканування документів" } },
       include: { assignee: { include: { person: true } } },
     });
-    if (accountantTask?.assignee?.person.telegramId) {
-      await queueTelegramMessage(accountantTask.assignee.person.telegramId, `Нова задача: прийом документів для ${employment.person.fullName}.`);
+    if (accountantTask?.assignee) {
+      await sendNotification(accountantTask.assignee.personId, "onboarding.accountantTaskAssigned", { fullName: employment.person.fullName });
     }
   }
 
@@ -448,12 +438,12 @@ export async function completeTask(
     const storeAdminId = await resolveAssignee(Role.STORE_ADMIN, employment.staffUnit.orgNode.path);
     if (storeAdminId) {
       const admin = await prisma.employment.findUnique({ where: { id: storeAdminId }, include: { person: true } });
-      if (admin?.person.telegramId) {
-        await queueTelegramMessage(admin.person.telegramId, `Оформлення ${employment.person.fullName} завершено — можна розпочинати навчання.`);
+      if (admin) {
+        await sendNotification(admin.personId, "onboarding.paperworkDoneAdmin", { fullName: employment.person.fullName });
       }
     }
-    if (employment.curator?.person.telegramId) {
-      await queueTelegramMessage(employment.curator.person.telegramId, `Оформлення ${employment.person.fullName} завершено — можна розпочинати стажування.`);
+    if (employment.curator) {
+      await sendNotification(employment.curator.personId, "onboarding.paperworkDoneCurator", { fullName: employment.person.fullName });
     }
   }
 
@@ -463,13 +453,9 @@ export async function completeTask(
     // тільки через Telegram, архітектурне рішення №1). До натискання
     // кнопки лишаємось у TRAINEE; READY_FOR_ATTESTATION і сповіщення
     // адміністратора — у confirmReadyForAttestation нижче.
-    if (employment.person.telegramId) {
-      await queueTelegramMessage(
-        employment.person.telegramId,
-        "Стажування завершено. Якщо готові складати атестацію — підтвердіть.",
-        { inline_keyboard: [[{ text: "Готовий(-а) до атестації", callback_data: `ready_for_attestation:${employment.id}` }]] },
-      );
-    }
+    await sendNotification(employment.personId, "onboarding.internshipDoneConfirmPrompt", {}, {
+      inline_keyboard: [[{ text: "Готовий(-а) до атестації", callback_data: `ready_for_attestation:${employment.id}` }]],
+    });
   }
 
   if (task.itemTemplate.title.startsWith("Атестація")) {
@@ -571,8 +557,8 @@ export async function confirmReadyForAttestation(
   const storeAdminId = await resolveAssignee(Role.STORE_ADMIN, employment.staffUnit.orgNode.path);
   if (storeAdminId) {
     const admin = await prisma.employment.findUnique({ where: { id: storeAdminId }, include: { person: true } });
-    if (admin?.person.telegramId) {
-      await queueTelegramMessage(admin.person.telegramId, `${employment.person.fullName} готовий(-а) до атестації.`);
+    if (admin) {
+      await sendNotification(admin.personId, "onboarding.readyForAttestationAdmin", { fullName: employment.person.fullName });
     }
   }
 
@@ -610,12 +596,10 @@ export async function completeCuratorAssignmentTask(
     include: { person: true, staffUnit: { include: { positionProfile: true } } },
   });
 
-  if (curator.person.telegramId) {
-    await queueTelegramMessage(
-      curator.person.telegramId,
-      `У вас новий підопічний: ${trainee.person.fullName} (${trainee.staffUnit.positionProfile.title}). Чек-ліст онбордингу — в системі.`,
-    );
-  }
+  await sendNotification(curator.personId, "onboarding.curatorAssigned", {
+    fullName: trainee.person.fullName,
+    positionTitle: trainee.staffUnit.positionProfile.title,
+  });
 
   await logAudit({
     actorId: completedByEmploymentId,

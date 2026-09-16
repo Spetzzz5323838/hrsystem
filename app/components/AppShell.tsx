@@ -18,9 +18,10 @@ const NAV = [
 /**
  * Спільна оболонка (бічна панель + шапка) — за візуальним рішенням
  * прототипу (hr-prototype-v3.jsx, компонент App: aside+nav+header).
- * Поки що підключена лише до нової головної сторінки — інші сторінки
- * (/employees, /structure, /catalog) мають власний повноекранний layout
- * і не займають переробку без окремої домовленості.
+ * Підключена до всіх сторінок з NAV (і картки працівника) — кожна сторінка
+ * монтує власний екземпляр (а не спільний layout), тож loading/error-стани
+ * теж мають обгортати свій контент у <AppShell>, інакше панель на мить
+ * (чи назавжди, при 403) зникає.
  */
 export default function AppShell({ active, children }: { active: string; children: React.ReactNode }) {
   const router = useRouter();

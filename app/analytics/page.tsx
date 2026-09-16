@@ -3,6 +3,19 @@
 import { useEffect, useState } from "react";
 import AppShell from "../components/AppShell";
 
+type FunnelStageCount = { status: string; label: string; count: number };
+type FunnelStageDuration = { key: string; label: string; avgHours: number | null; sampleSize: number };
+type FunnelData = {
+  months: number;
+  totalStarted: number;
+  currentByStage: FunnelStageCount[];
+  completed: number;
+  abandoned: number;
+  stageDurations: FunnelStageDuration[];
+  totalDurationHours: number | null;
+  totalDurationSampleSize: number;
+};
+
 type StaffingRow = { positionProfileId: number; title: string; planned: number; actual: number; gap: number };
 type StaffingObject = {
   objectId: number;
@@ -23,6 +36,56 @@ type TurnoverData = {
   byObject: TurnoverObjectRow[];
 };
 
+type SlaByObjectRow = { objectId: number; objectName: string; onTime: number; late: number; currentlyOverdue: number; total: number; onTimePercent: number };
+type SlaByRoleRow = { role: string; onTime: number; late: number; currentlyOverdue: number; total: number; onTimePercent: number };
+type SlaData = {
+  months: number;
+  onTime: number;
+  late: number;
+  currentlyOverdue: number;
+  total: number;
+  onTimePercent: number;
+  escalated: number;
+  byObject: SlaByObjectRow[];
+  byRole: SlaByRoleRow[];
+};
+
+const SLA_ROLE_LABELS: Record<string, string> = {
+  EMPLOYEE: "Працівник",
+  CURATOR: "Куратор",
+  STORE_ADMIN: "Адміністратор магазину",
+  ONEC_ADMIN: "Оператор 1С",
+  ACCOUNTANT: "Бухгалтер",
+  AUDITOR: "Ревізор",
+  COO: "Керівництво",
+  SYSADMIN: "Системний адміністратор",
+  SYSTEM: "Система (авто)",
+};
+
+type RatingAuthorRow = {
+  authorId: number;
+  authorName: string;
+  totalEvents: number;
+  positiveCount: number;
+  negativeCount: number;
+  dominantKey: string | null;
+  dominantSharePercent: number;
+};
+type RatingAuthorData = {
+  months: number;
+  onlyNegative: RatingAuthorRow[];
+  noRatings: { employmentId: number; fullName: string }[];
+  sameEverything: RatingAuthorRow[];
+};
+type RatingCategoryOption = { code: string; name: string; side: "POS" | "NEG" };
+
+const RATING_KEY_FALLBACK: Record<string, string> = {
+  REPRIMAND: "Догана",
+  AWARD: "Номінація",
+  POSITIVE: "Позитив (без приводу)",
+  NEGATIVE: "Негатив (без приводу)",
+};
+
 type ExpiringRow = {
   personId: number;
   fullName: string;
@@ -39,6 +102,16 @@ function fmt(iso: string): string {
   return new Date(iso).toLocaleDateString("uk-UA", { day: "2-digit", month: "2-digit", year: "numeric" });
 }
 
+function fmtHours(hours: number): string {
+  if (hours < 48) return `${Math.round(hours * 10) / 10} год`;
+  return `${Math.round((hours / 24) * 10) / 10} дн.`;
+}
+
+function ratingKeyLabel(key: string | null, categories: RatingCategoryOption[]): string {
+  if (!key) return "—";
+  return categories.find((c) => c.code === key)?.name ?? RATING_KEY_FALLBACK[key] ?? key;
+}
+
 function Section({ title, right, children }: { title: string; right?: React.ReactNode; children: React.ReactNode }) {
   return (
     <div className="rounded-md border border-slate-200 bg-white">
@@ -52,12 +125,29 @@ function Section({ title, right, children }: { title: string; right?: React.Reac
 }
 
 export default function AnalyticsPage() {
+  const [funnel, setFunnel] = useState<FunnelData | null>(null);
+  const [funnelMonths, setFunnelMonths] = useState(6);
   const [staffing, setStaffing] = useState<StaffingObject[] | null>(null);
   const [turnover, setTurnover] = useState<TurnoverData | null>(null);
   const [turnoverMonths, setTurnoverMonths] = useState(12);
+  const [sla, setSla] = useState<SlaData | null>(null);
+  const [slaMonths, setSlaMonths] = useState(3);
+  const [ratingAuthors, setRatingAuthors] = useState<RatingAuthorData | null>(null);
+  const [ratingMonths, setRatingMonths] = useState(3);
+  const [ratingCategories, setRatingCategories] = useState<RatingCategoryOption[]>([]);
   const [expiring, setExpiring] = useState<ExpiringRow[] | null>(null);
   const [months, setMonths] = useState(3);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch(`/api/analytics/hiring-funnel?months=${funnelMonths}`)
+      .then((r) => r.json().then((b) => ({ ok: r.ok, b })))
+      .then(({ ok, b }) => {
+        if (!ok) throw new Error(b.error);
+        setFunnel(b);
+      })
+      .catch((e) => setError(e.message));
+  }, [funnelMonths]);
 
   useEffect(() => {
     fetch("/api/analytics/staffing")
@@ -78,6 +168,33 @@ export default function AnalyticsPage() {
       })
       .catch((e) => setError(e.message));
   }, [turnoverMonths]);
+
+  useEffect(() => {
+    fetch(`/api/analytics/sla-discipline?months=${slaMonths}`)
+      .then((r) => r.json().then((b) => ({ ok: r.ok, b })))
+      .then(({ ok, b }) => {
+        if (!ok) throw new Error(b.error);
+        setSla(b);
+      })
+      .catch((e) => setError(e.message));
+  }, [slaMonths]);
+
+  useEffect(() => {
+    fetch("/api/rating-categories")
+      .then((r) => r.json())
+      .then((b) => setRatingCategories(b))
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    fetch(`/api/analytics/rating-authors?months=${ratingMonths}`)
+      .then((r) => r.json().then((b) => ({ ok: r.ok, b })))
+      .then(({ ok, b }) => {
+        if (!ok) throw new Error(b.error);
+        setRatingAuthors(b);
+      })
+      .catch((e) => setError(e.message));
+  }, [ratingMonths]);
 
   useEffect(() => {
     fetch(`/api/analytics/competency-expiry?months=${months}`)
@@ -104,6 +221,85 @@ export default function AnalyticsPage() {
     <AppShell active="/analytics">
       <div className="space-y-4">
         <h2 className="text-xl font-semibold text-slate-900">Аналітика</h2>
+
+        <Section
+          title="Воронка найму"
+          right={
+            <select
+              value={funnelMonths}
+              onChange={(e) => setFunnelMonths(Number(e.target.value))}
+              className="rounded border border-slate-300 bg-white px-2 py-1 text-xs"
+            >
+              <option value={1}>1 місяць</option>
+              <option value={3}>3 місяці</option>
+              <option value={6}>6 місяців</option>
+              <option value={12}>12 місяців</option>
+            </select>
+          }
+        >
+          {!funnel && <p className="px-4 py-6 text-sm text-slate-500">Завантаження…</p>}
+          {funnel && !funnel.totalStarted && <p className="px-4 py-6 text-sm text-slate-500">За обраний період нових онбордингів не було.</p>}
+          {funnel && !!funnel.totalStarted && (
+            <div className="px-4 py-3">
+              <p className="text-sm text-slate-700">
+                За {funnel.months} міс. стартувало <span className="font-semibold text-slate-900">{funnel.totalStarted}</span>, завершено{" "}
+                <span className="font-semibold text-emerald-700">{funnel.completed}</span>
+                {funnel.abandoned > 0 && (
+                  <>
+                    , перервано звільненням <span className="font-semibold text-rose-700">{funnel.abandoned}</span>
+                  </>
+                )}
+              </p>
+
+              <div className="mt-3 grid gap-4 sm:grid-cols-2">
+                <div>
+                  <p className="mb-1 text-xs font-medium text-slate-500">Зараз на етапі (не завершені)</p>
+                  <table className="w-full text-xs">
+                    <tbody className="divide-y divide-slate-50">
+                      {funnel.currentByStage
+                        .filter((s) => s.count > 0)
+                        .map((s) => (
+                          <tr key={s.status}>
+                            <td className="py-1 text-slate-700">{s.label}</td>
+                            <td className="w-10 py-1 text-right tabular-nums text-slate-500">{s.count}</td>
+                          </tr>
+                        ))}
+                      {!funnel.currentByStage.some((s) => s.count > 0) && (
+                        <tr>
+                          <td className="py-1 text-slate-400">Немає активних онбордингів.</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+                <div>
+                  <p className="mb-1 text-xs font-medium text-slate-500">
+                    Середній час по етапах
+                    <span className="ml-1 font-normal text-slate-400">(тільки процеси з 12.09.2026 — раніше час переходів не фіксувався)</span>
+                  </p>
+                  <table className="w-full text-xs">
+                    <tbody className="divide-y divide-slate-50">
+                      {funnel.stageDurations.map((d) => (
+                        <tr key={d.key}>
+                          <td className="py-1 text-slate-700">{d.label}</td>
+                          <td className="w-24 py-1 text-right tabular-nums text-slate-500">
+                            {d.avgHours != null ? fmtHours(d.avgHours) : "—"}
+                          </td>
+                        </tr>
+                      ))}
+                      {funnel.totalDurationHours != null && (
+                        <tr className="font-medium">
+                          <td className="py-1 text-slate-900">Загалом реєстрація → активний</td>
+                          <td className="w-24 py-1 text-right tabular-nums text-slate-900">{fmtHours(funnel.totalDurationHours)}</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+        </Section>
 
         <Section
           title="Укомплектованість"
@@ -214,6 +410,174 @@ export default function AnalyticsPage() {
                   </div>
                 </div>
               )}
+            </div>
+          )}
+        </Section>
+
+        <Section
+          title="Дисципліна за SLA"
+          right={
+            <select
+              value={slaMonths}
+              onChange={(e) => setSlaMonths(Number(e.target.value))}
+              className="rounded border border-slate-300 bg-white px-2 py-1 text-xs"
+            >
+              <option value={1}>1 місяць</option>
+              <option value={3}>3 місяці</option>
+              <option value={6}>6 місяців</option>
+              <option value={12}>12 місяців</option>
+            </select>
+          }
+        >
+          {!sla && <p className="px-4 py-6 text-sm text-slate-500">Завантаження…</p>}
+          {sla && !sla.total && !sla.currentlyOverdue && (
+            <p className="px-4 py-6 text-sm text-slate-500">За обраний період немає пунктів чек-листа з нормативом виконання.</p>
+          )}
+          {sla && (!!sla.total || !!sla.currentlyOverdue) && (
+            <div className="px-4 py-3">
+              <p className="text-sm text-slate-700">
+                За {sla.months} міс. виконано вчасно <span className="font-semibold text-emerald-700">{sla.onTime}</span>, з
+                протермінуванням <span className="font-semibold text-rose-700">{sla.late}</span> (
+                <span className="font-semibold text-slate-900">{sla.onTimePercent}%</span> вчасно)
+                {sla.currentlyOverdue > 0 && (
+                  <>
+                    ; зараз протерміновано й не виконано <span className="font-semibold text-rose-700">{sla.currentlyOverdue}</span>
+                  </>
+                )}
+                {sla.escalated > 0 && (
+                  <>
+                    , ескальовано керівнику <span className="font-semibold text-amber-700">{sla.escalated}</span>
+                  </>
+                )}
+              </p>
+
+              <div className="mt-3 grid gap-4 sm:grid-cols-2">
+                <div>
+                  <p className="mb-1 text-xs font-medium text-slate-500">За об&rsquo;єктом</p>
+                  <table className="w-full text-xs">
+                    <tbody className="divide-y divide-slate-50">
+                      {sla.byObject.map((o) => (
+                        <tr key={o.objectId}>
+                          <td className="py-1 text-slate-700">{o.objectName}</td>
+                          <td className="w-14 py-1 text-right tabular-nums text-slate-500">{o.onTimePercent}%</td>
+                          {o.currentlyOverdue > 0 && (
+                            <td className="w-20 py-1 text-right text-rose-600">горить: {o.currentlyOverdue}</td>
+                          )}
+                        </tr>
+                      ))}
+                      {!sla.byObject.length && (
+                        <tr>
+                          <td className="py-1 text-slate-400">Немає даних.</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+                <div>
+                  <p className="mb-1 text-xs font-medium text-slate-500">За відповідальним</p>
+                  <table className="w-full text-xs">
+                    <tbody className="divide-y divide-slate-50">
+                      {sla.byRole.map((r) => (
+                        <tr key={r.role}>
+                          <td className="py-1 text-slate-700">{SLA_ROLE_LABELS[r.role] ?? r.role}</td>
+                          <td className="w-14 py-1 text-right tabular-nums text-slate-500">{r.onTimePercent}%</td>
+                          {r.currentlyOverdue > 0 && (
+                            <td className="w-20 py-1 text-right text-rose-600">горить: {r.currentlyOverdue}</td>
+                          )}
+                        </tr>
+                      ))}
+                      {!sla.byRole.length && (
+                        <tr>
+                          <td className="py-1 text-slate-400">Немає даних.</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+        </Section>
+
+        <Section
+          title="Оцінювання по авторах"
+          right={
+            <select
+              value={ratingMonths}
+              onChange={(e) => setRatingMonths(Number(e.target.value))}
+              className="rounded border border-slate-300 bg-white px-2 py-1 text-xs"
+            >
+              <option value={1}>1 місяць</option>
+              <option value={3}>3 місяці</option>
+              <option value={6}>6 місяців</option>
+              <option value={12}>12 місяців</option>
+            </select>
+          }
+        >
+          {!ratingAuthors && <p className="px-4 py-6 text-sm text-slate-500">Завантаження…</p>}
+          {ratingAuthors && (
+            <div className="px-4 py-3 space-y-4">
+              <div>
+                <p className="mb-1 text-xs font-medium text-slate-500">
+                  Ставить лише негатив <span className="font-normal text-slate-400">(від 3 оцінок за період, 0% позитиву/номінацій)</span>
+                </p>
+                {!ratingAuthors.onlyNegative.length ? (
+                  <p className="text-sm text-slate-400">Немає таких авторів.</p>
+                ) : (
+                  <table className="w-full text-xs">
+                    <tbody className="divide-y divide-slate-50">
+                      {ratingAuthors.onlyNegative.map((r) => (
+                        <tr key={r.authorId}>
+                          <td className="py-1 text-slate-700">{r.authorName}</td>
+                          <td className="w-32 py-1 text-right tabular-nums text-rose-700">{r.totalEvents} негативних оцінок</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+
+              <div>
+                <p className="mb-1 text-xs font-medium text-slate-500">
+                  Не ставить нічого <span className="font-normal text-slate-400">(є підлеглі, 0 оцінок за період)</span>
+                </p>
+                {!ratingAuthors.noRatings.length ? (
+                  <p className="text-sm text-slate-400">Немає таких керівників.</p>
+                ) : (
+                  <table className="w-full text-xs">
+                    <tbody className="divide-y divide-slate-50">
+                      {ratingAuthors.noRatings.map((m) => (
+                        <tr key={m.employmentId}>
+                          <td className="py-1 text-slate-700">{m.fullName}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+
+              <div>
+                <p className="mb-1 text-xs font-medium text-slate-500">
+                  Ставить усім однаково <span className="font-normal text-slate-400">(від 3 оцінок, один привід ≥80%)</span>
+                </p>
+                {!ratingAuthors.sameEverything.length ? (
+                  <p className="text-sm text-slate-400">Немає таких авторів.</p>
+                ) : (
+                  <table className="w-full text-xs">
+                    <tbody className="divide-y divide-slate-50">
+                      {ratingAuthors.sameEverything.map((r) => (
+                        <tr key={r.authorId}>
+                          <td className="py-1 text-slate-700">{r.authorName}</td>
+                          <td className="py-1 text-slate-500">{ratingKeyLabel(r.dominantKey, ratingCategories)}</td>
+                          <td className="w-32 py-1 text-right tabular-nums text-amber-700">
+                            {r.dominantSharePercent}% з {r.totalEvents}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
             </div>
           )}
         </Section>

@@ -1,12 +1,14 @@
 import { Bot, Keyboard } from "grammy";
 import { prisma } from "../lib/prisma";
 import { resolveAssignee, confirmReadyForAttestation, completeTask, getMyPendingEmployeeMarkTasks } from "../lib/onboarding";
-import { queueTelegramMessage, registerTelegramMessageWorker } from "../lib/notifications";
+import { registerTelegramMessageWorker } from "../lib/notifications";
+import { sendNotification } from "../lib/notificationTemplates";
 import { getBoss } from "../lib/queue";
 import { checkSlaEscalations } from "../lib/sla";
 import { runPeriodicBadgeChecks } from "../lib/badges-periodic";
 import { cleanupExpiredDocuments } from "../lib/document-retention";
 import { acknowledgeReview } from "../lib/review";
+import { approveLoginChallenge } from "../lib/auth";
 import { checkVacationConflicts, createVacationRequest, type ConflictCheck } from "../lib/vacation";
 import { deliverOnecPassword } from "../lib/onecPassword";
 import { ONEC_PASSWORD_DELIVERY_QUEUE } from "../lib/notifications";
@@ -415,11 +417,8 @@ bot.on("message:contact", async (ctx) => {
     const adminEmploymentId = await resolveAssignee(Role.STORE_ADMIN, state.orgNodePath);
     if (adminEmploymentId) {
       const adminEmployment = await prisma.employment.findUnique({ where: { id: adminEmploymentId }, include: { person: true } });
-      if (adminEmployment?.person.telegramId) {
-        await queueTelegramMessage(
-          adminEmployment.person.telegramId,
-          `Нова заявка на реєстрацію: ${state.fullName} (${state.orgNodeName}). Перевірте розділ «Нові заявки» в системі.`,
-        );
+      if (adminEmployment) {
+        await sendNotification(adminEmployment.personId, "bot.newHireRequest", { fullName: state.fullName, objectName: state.orgNodeName });
       }
     }
   } catch (error) {
@@ -470,6 +469,20 @@ bot.callbackQuery(/^ready_for_attestation:(\d+)$/, async (ctx) => {
   await ctx.answerCallbackQuery({ text: "Підтверджено!" });
   await ctx.editMessageReplyMarkup(undefined).catch(() => {});
   await ctx.reply("Готовність до атестації підтверджено. Адміністратор сповіщений.");
+});
+
+bot.callbackQuery(/^login_confirm:(\d+)$/, async (ctx) => {
+  const challengeId = Number(ctx.match[1]);
+  const result = await approveLoginChallenge(challengeId, BigInt(ctx.from.id));
+
+  if (!result.ok) {
+    await ctx.answerCallbackQuery({ text: result.error, show_alert: true });
+    return;
+  }
+
+  await ctx.answerCallbackQuery({ text: "Вхід підтверджено!" });
+  await ctx.editMessageReplyMarkup(undefined).catch(() => {});
+  await ctx.reply("Вхід підтверджено. Можете повернутись у браузер.");
 });
 
 // ── Пункти чек-ліста з responsibleRole=EMPLOYEE (docs plan-v1.md §6.1,

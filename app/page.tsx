@@ -74,8 +74,20 @@ export default function HomePage() {
       .finally(() => setLoading(false));
   }, [router]);
 
-  if (loading) return <div className="flex min-h-screen items-center justify-center text-sm text-slate-500">Завантаження…</div>;
-  if (error) return <div className="flex min-h-screen items-center justify-center text-sm text-rose-700">{error}</div>;
+  if (loading) {
+    return (
+      <AppShell active="/">
+        <div className="text-sm text-slate-500">Завантаження…</div>
+      </AppShell>
+    );
+  }
+  if (error) {
+    return (
+      <AppShell active="/">
+        <div className="text-sm text-rose-700">{error}</div>
+      </AppShell>
+    );
+  }
 
   return (
     <AppShell active="/">

@@ -1,6 +1,6 @@
 import { prisma } from "./prisma";
 import { completeTask } from "./onboarding";
-import { queueTelegramMessage } from "./notifications";
+import { sendNotification } from "./notificationTemplates";
 import { findAncestorPath } from "./permissions";
 import { logAudit } from "./audit";
 import { EmploymentStatus, OrgNodeType } from "../generated/prisma/client";
@@ -126,17 +126,20 @@ export async function submitAttestation(
     diff: { attemptNumber, totalScore, maxScore: form.maxScore, percent: Math.round(percent) },
   });
 
-  if (employment.curator?.person.telegramId) {
+  if (employment.curator) {
     const scoreByItemId = new Map(scores.map((s) => [s.itemId, s.score]));
     const sectionLines = form.sections.map((section) => {
       const sectionMax = section.items.reduce((sum, i) => sum + i.maxPoints, 0);
       const sectionScore = section.items.reduce((sum, i) => sum + (scoreByItemId.get(i.id) ?? 0), 0);
       return `• ${section.title}: ${sectionScore}/${sectionMax}`;
     });
-    await queueTelegramMessage(
-      employment.curator.person.telegramId,
-      `Атестація ${employment.person.fullName} не складена (спроба ${attemptNumber}, ${Math.round(percent)}% при потрібних ${form.passThresholdPercent}%).\n\n${sectionLines.join("\n")}`,
-    );
+    await sendNotification(employment.curator.personId, "attestation.failedCurator", {
+      fullName: employment.person.fullName,
+      attemptNumber: String(attemptNumber),
+      percent: String(Math.round(percent)),
+      threshold: String(form.passThresholdPercent),
+      sections: sectionLines.join("\n"),
+    });
   }
 
   if (attemptNumber >= 3) {
@@ -144,11 +147,11 @@ export async function submitAttestation(
     const divisionNode = divisionPath ? await prisma.orgNode.findFirst({ where: { path: divisionPath } }) : null;
     if (divisionNode?.headEmploymentId) {
       const head = await prisma.employment.findUnique({ where: { id: divisionNode.headEmploymentId }, include: { person: true } });
-      if (head?.person.telegramId) {
-        await queueTelegramMessage(
-          head.person.telegramId,
-          `${employment.person.fullName} провалив(-ла) атестацію втретє (${Math.round(percent)}%). Потрібне рішення.`,
-        );
+      if (head) {
+        await sendNotification(head.personId, "attestation.thirdFailEscalation", {
+          fullName: employment.person.fullName,
+          percent: String(Math.round(percent)),
+        });
       }
     }
   }

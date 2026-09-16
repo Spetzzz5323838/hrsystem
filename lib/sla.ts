@@ -1,6 +1,6 @@
 import { prisma } from "./prisma";
 import { getInstanceTasks } from "./onboarding";
-import { queueTelegramMessage } from "./notifications";
+import { sendNotification } from "./notificationTemplates";
 import { findNearestHead } from "./permissions";
 import { TaskStatus, Role, ActionType } from "../generated/prisma/client";
 
@@ -36,7 +36,7 @@ export async function checkSlaEscalations(): Promise<void> {
   for (const task of overdueCandidates) {
     if (blockedTaskIds.has(task.id)) continue;
 
-    if (task.assignee?.person.telegramId) {
+    if (task.assignee) {
       // Для EMPLOYEE-MARK пунктів (докс §6.1, напр. "Згода на обробку
       // персональних даних") додаємо кнопку сюди ж — на випадок, якщо
       // push при розблокуванні (lib/onboarding.ts::notifyEmployeeMarkTask)
@@ -46,9 +46,10 @@ export async function checkSlaEscalations(): Promise<void> {
         task.itemTemplate.responsibleRole === Role.EMPLOYEE && task.itemTemplate.actionType === ActionType.MARK
           ? { inline_keyboard: [[{ text: "Виконано", callback_data: `employee_task_done:${task.id}` }]] }
           : undefined;
-      await queueTelegramMessage(
-        task.assignee.person.telegramId,
-        `Протерміновано: «${task.itemTemplate.title}». Норматив минув ${task.dueAt?.toLocaleString("uk-UA")}.`,
+      await sendNotification(
+        task.assignee.personId,
+        "sla.overdueReminder",
+        { taskTitle: task.itemTemplate.title, dueAt: task.dueAt?.toLocaleString("uk-UA") ?? "" },
         replyMarkup,
       );
     }
@@ -71,11 +72,11 @@ export async function checkSlaEscalations(): Promise<void> {
     const headEmploymentId = await findNearestHead(task.instance.employment.staffUnit.orgNode.path);
     if (headEmploymentId) {
       const head = await prisma.employment.findUnique({ where: { id: headEmploymentId }, include: { person: true } });
-      if (head?.person.telegramId) {
-        await queueTelegramMessage(
-          head.person.telegramId,
-          `Ескалація: «${task.itemTemplate.title}» для ${task.instance.employment.person.fullName} протерміновано понад добу.`,
-        );
+      if (head) {
+        await sendNotification(head.personId, "sla.escalation", {
+          taskTitle: task.itemTemplate.title,
+          fullName: task.instance.employment.person.fullName,
+        });
       }
     }
     await prisma.task.update({ where: { id: task.id }, data: { escalatedAt: now } });

@@ -1,5 +1,5 @@
 import { prisma } from "./prisma";
-import { queueTelegramMessage } from "./notifications";
+import { sendNotification } from "./notificationTemplates";
 import { ReviewCriterion } from "../generated/prisma/client";
 
 export const REVIEW_CRITERIA: ReviewCriterion[] = ["QUALITY", "RELIABILITY", "PACE", "TEAM", "CLIENT", "INITIATIVE"];
@@ -93,13 +93,12 @@ export async function confirmConversation(
     data: { conversationConfirmedAt: new Date(), conversationConfirmedById: confirmedByEmploymentId },
   });
 
-  if (review.employment.person.telegramId) {
-    await queueTelegramMessage(
-      review.employment.person.telegramId,
-      `У вас квартальна оцінка за ${review.quarter} квартал ${review.year}. Обговоріть її з керівником, якщо ще не встигли, і підтвердьте ознайомлення нижче.`,
-      { inline_keyboard: [[{ text: "Ознайомлений(-а)", callback_data: `review_ack:${review.id}` }]] },
-    );
-  }
+  await sendNotification(
+    review.employment.personId,
+    "review.newQuarterlyReview",
+    { quarter: String(review.quarter), year: String(review.year) },
+    { inline_keyboard: [[{ text: "Ознайомлений(-а)", callback_data: `review_ack:${review.id}` }]] },
+  );
 
   return { ok: true };
 }

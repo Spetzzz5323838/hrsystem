@@ -72,6 +72,16 @@ enum Capability {
   /// Відпустки (v1.2 §4) — те саме, що вище: докс не називає можливість,
   /// беру APPROVE_VACATION з прототипу (ACTORS.caps).
   APPROVE_VACATION
+  /// Друк бейджа-перепустки (catalogs-v1.1.md §6.1, п.10 "Видача бейджа,
+  /// спецодягу, ключів" — докс не називає окрему можливість, MARK-пункт
+  /// сам по собі без друку). Хто має PRINT_BADGE, тому дозволено читати
+  /// САМЕ Document(type=PHOTO) для конкретної людини в обхід VIEW_DOCUMENTS
+  /// (архітектурне рішення №9) — вузький виняток, узгоджений з
+  /// користувачем 2026-09-17: фото для бейджа завантажує сам адміністратор
+  /// магазину, і саме він же друкує бейдж, тому логічно, що воно йому
+  /// доступне; інші типи сканів (паспорт, медкнижка тощо) лишаються
+  /// недоступними, як і раніше.
+  PRINT_BADGE
 }
 
 enum EmploymentStatus {
@@ -253,12 +263,51 @@ model Person {
   ratingEvents      RatingEvent[]
   badgeAwards       BadgeAward[]
   documents         Document[]
+  loginChallenges   LoginChallenge[]
+  trustedDevices    TrustedDevice[]
+  notifications     Notification[]
 }
 
 /// Веб-сесія після входу. У базі — тільки хеш токена (SHA-256), сам
 /// токен живе лише в httpOnly cookie й ніколи не потрапляє в БД у
 /// відкритому вигляді. TTL 12 год (docs hr-system-plan-v1.md §4.4).
 model Session {
+  id        Int      @id @default(autoincrement())
+  personId  Int
+  person    Person   @relation(fields: [personId], references: [id])
+  tokenHash String   @unique
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+
+  @@index([personId])
+}
+
+enum LoginChallengeStatus {
+  PENDING
+  APPROVED
+  EXPIRED
+}
+
+/// 2FA (docs plan-v1.md §4.4): підтвердження входу кнопкою в Telegram для
+/// ONEC_ADMIN/ACCOUNTANT/COO/SYSADMIN. `consumedAt` — захист від подвійного
+/// створення сесії, якщо клієнт опитує статус кілька разів поспіль.
+model LoginChallenge {
+  id         Int                  @id @default(autoincrement())
+  personId   Int
+  person     Person               @relation(fields: [personId], references: [id])
+  status     LoginChallengeStatus @default(PENDING)
+  createdAt  DateTime             @default(now())
+  expiresAt  DateTime
+  approvedAt DateTime?
+  consumedAt DateTime?
+
+  @@index([personId])
+}
+
+/// "Довірений пристрій" (docs plan-v1.md §4.4, 30 днів) — окремий cookie
+/// від сесії: після одного підтвердження 2FA цей браузер не питає його
+/// знову, доки токен не спливе.
+model TrustedDevice {
   id        Int      @id @default(autoincrement())
   personId  Int
   person    Person   @relation(fields: [personId], references: [id])
@@ -923,6 +972,45 @@ model AuditLog {
 
   @@index([entityType, entityId])
   @@index([actorId])
+}
+
+/// Текст сповіщень (docs plan-v1.md §8: "Шаблони повідомлень — у БД, не в
+/// коді") — редагує SYSADMIN через /catalog без розробника. `key` —
+/// стабільний ідентифікатор із коду (напр. "vacation.approved"),
+/// `{{плейсхолдери}}` підставляються при відправці.
+model NotificationTemplate {
+  id          Int      @id @default(autoincrement())
+  key         String   @unique
+  description String
+  text        String
+  updatedAt   DateTime @updatedAt
+}
+
+enum NotificationStatus {
+  QUEUED
+  SENT
+  FAILED
+}
+
+/// Журнал кожного фактичного відправлення (docs plan-v1.md §8: "Кожне
+/// відправлення пишеться в Notification зі статусом, ретраї через
+/// pg-boss"). `text` — уже відрендерений текст на момент відправки (не
+/// посилання на шаблон), щоб історія не "переписувалась", коли хтось
+/// згодом відредагує шаблон. `status` — поточний відомий стан: FAILED тут
+/// означає "останній зареєстрований збій", а не "вичерпано всі ретраї" —
+/// pg-boss може ще повторити спробу, і статус тоді перепишеться на SENT.
+model Notification {
+  id          Int                 @id @default(autoincrement())
+  recipientId Int
+  recipient   Person              @relation(fields: [recipientId], references: [id])
+  templateKey String?
+  text        String
+  status      NotificationStatus  @default(QUEUED)
+  error       String?
+  createdAt   DateTime            @default(now())
+  sentAt      DateTime?
+
+  @@index([recipientId])
 }
 
 /// Обладнання, закріплене за працівником (docs plan-v1.md §11).

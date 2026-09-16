@@ -187,11 +187,13 @@ function Checklist({
   myEmploymentIds,
   onToggle,
   busyTaskId,
+  employmentId,
 }: {
   tasks: TaskRow[];
   myEmploymentIds: number[];
   onToggle: (taskId: number) => void;
   busyTaskId: number | null;
+  employmentId?: string;
 }) {
   const firstOpen = tasks.findIndex((t) => t.status !== "DONE" && t.isBlocking);
 
@@ -224,6 +226,16 @@ function Checklist({
                 </span>
                 {t.overdue && (
                   <span className="rounded bg-rose-50 px-1.5 py-0.5 text-xs text-rose-700 border border-rose-200">протерміновано</span>
+                )}
+                {t.title === "Видача бейджа, спецодягу, ключів" && employmentId && (
+                  <a
+                    href={`/api/employees/${employmentId}/badge`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs text-slate-500 underline underline-offset-2 hover:text-slate-800"
+                  >
+                    друкувати бейдж
+                  </a>
                 )}
               </div>
               <p className="mt-1 text-xs text-slate-500">
@@ -1678,11 +1690,19 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
   };
 
   if (error) {
-    return <div className="px-6 py-6 text-sm text-rose-700">{error}</div>;
+    return (
+      <AppShell active="/employees">
+        <div className="text-sm text-rose-700">{error}</div>
+      </AppShell>
+    );
   }
 
   if (!detail) {
-    return <div className="px-6 py-6 text-sm text-slate-500">Завантаження…</div>;
+    return (
+      <AppShell active="/employees">
+        <div className="text-sm text-slate-500">Завантаження…</div>
+      </AppShell>
+    );
   }
 
   const gapsCount = detail.competencies.filter((c) => c.state !== "valid").length;
@@ -1798,7 +1818,13 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
                   </span>
                 }
               >
-                <Checklist tasks={onboarding.tasks} myEmploymentIds={myEmploymentIds} onToggle={completeTask} busyTaskId={busyTaskId} />
+                <Checklist
+                  tasks={onboarding.tasks}
+                  myEmploymentIds={myEmploymentIds}
+                  onToggle={completeTask}
+                  busyTaskId={busyTaskId}
+                  employmentId={employmentId}
+                />
               </Section>
             )}
             {onboarding?.tasks.some((t) => t.title === "Реєстрація в 1С, генерація пароля" && t.status === "DONE") && (
