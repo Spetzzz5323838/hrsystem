@@ -309,6 +309,13 @@ model Employment {
   terminationReason     TerminationReason? @relation(fields: [terminationReasonCode], references: [code])
   lastWorkingDay        DateTime?
 
+  /// Пароль від 1С/каси (docs plan-v1.md §8/§14): зашифрований
+  /// AES-256-GCM, ключ поза базою (ONEC_PASSWORD_KEY у .env). Ніколи не
+  /// зберігається відкритим текстом і не виводиться в UI — тільки
+  /// штрихкод одноразово в Telegram, lib/onecPassword.ts.
+  onecPasswordCipher String?
+  onecPasswordSetAt  DateTime?
+
   managerId    Int?
   manager      Employment?  @relation("EmploymentManager", fields: [managerId], references: [id])
   subordinates Employment[] @relation("EmploymentManager")

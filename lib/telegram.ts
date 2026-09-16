@@ -18,3 +18,28 @@ export async function sendTelegramMessage(telegramId: bigint, text: string, repl
     throw new Error(`sendTelegramMessage failed: ${await response.text()}`);
   }
 }
+
+/**
+ * Картинка (штрихкод пароля 1С, docs plan-v1.md §8/§14) з
+ * `protect_content: true` — Telegram блокує пересилання й збереження
+ * повідомлення. Той самий принцип "кидає при збої", що й sendTelegramMessage
+ * — виклик тільки всередині pg-boss-воркера.
+ */
+export async function sendTelegramPhoto(telegramId: bigint, photo: Buffer, caption: string): Promise<void> {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) return;
+
+  const form = new FormData();
+  form.append("chat_id", telegramId.toString());
+  form.append("caption", caption);
+  form.append("protect_content", "true");
+  form.append("photo", new Blob([new Uint8Array(photo)], { type: "image/png" }), "barcode.png");
+
+  const response = await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, {
+    method: "POST",
+    body: form,
+  });
+  if (!response.ok) {
+    throw new Error(`sendTelegramPhoto failed: ${await response.text()}`);
+  }
+}

@@ -125,6 +125,9 @@ const AUDIT_ACTION_LABELS: Record<string, string> = {
   "onboarding.readyForAttestation": "Готовий до атестації",
   "onboarding.activated": "Атестацію складено, статус ACTIVE",
   "attestation.failed": "Атестацію не складено",
+  "onec.passwordSet": "Видано пароль 1С",
+  "onec.passwordReissued": "Перевидано пароль 1С",
+  "onec.passwordShown": "Пароль 1С надіслано працівнику",
 };
 
 function auditActionLabel(action: string): string {
@@ -428,6 +431,65 @@ function ScoreDialog({
             }`}
           >
             Зберегти
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function OnecPasswordDialog({
+  title,
+  submitting,
+  error,
+  onClose,
+  onSubmit,
+}: {
+  title: string;
+  submitting: boolean;
+  error: string | null;
+  onClose: () => void;
+  onSubmit: (password: string) => void;
+}) {
+  const [password, setPassword] = useState("");
+  const valid = password.trim().length >= 4;
+
+  return (
+    <div className="fixed inset-0 z-20 flex items-center justify-center bg-slate-900/40 px-4">
+      <div className="w-full max-w-sm rounded-md bg-white p-5">
+        <div className="flex items-start justify-between">
+          <h3 className="text-lg font-semibold text-slate-900">{title}</h3>
+          <button onClick={onClose}>
+            <X size={18} className="text-slate-400" />
+          </button>
+        </div>
+
+        <label className="mt-4 block">
+          <span className="text-sm text-slate-700">Пароль, виданий 1С</span>
+          <input
+            type="text"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            className="mt-1 w-full rounded border border-slate-300 px-2 py-1.5 text-sm font-mono"
+            autoComplete="off"
+          />
+          <p className="mt-1 text-xs text-slate-400">Буде зашифровано й надіслано працівнику штрихкодом у Telegram, одноразово.</p>
+        </label>
+
+        {error && <p className="mt-3 text-sm text-rose-700">{error}</p>}
+
+        <div className="mt-4 flex justify-end gap-2">
+          <button onClick={onClose} className="rounded border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-50">
+            Скасувати
+          </button>
+          <button
+            disabled={submitting || !valid}
+            onClick={() => onSubmit(password.trim())}
+            className={`rounded px-3 py-1.5 text-sm font-medium text-white ${
+              submitting || !valid ? "cursor-not-allowed bg-slate-300" : "bg-slate-800 hover:bg-slate-700"
+            }`}
+          >
+            Зберегти й надіслати
           </button>
         </div>
       </div>
@@ -909,6 +971,14 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
   const [scoreSubmitting, setScoreSubmitting] = useState(false);
   const [attestationDialogTaskId, setAttestationDialogTaskId] = useState<number | null>(null);
 
+  const [onecPasswordDialogTaskId, setOnecPasswordDialogTaskId] = useState<number | null>(null);
+  const [onecPasswordError, setOnecPasswordError] = useState<string | null>(null);
+  const [onecPasswordSubmitting, setOnecPasswordSubmitting] = useState(false);
+
+  const [onecReissueOpen, setOnecReissueOpen] = useState(false);
+  const [onecReissueError, setOnecReissueError] = useState<string | null>(null);
+  const [onecReissueSubmitting, setOnecReissueSubmitting] = useState(false);
+
   type PendingChecklistTask = {
     taskId: number;
     title: string;
@@ -934,6 +1004,11 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
         .then((r) => (r.ok ? r.json() : []))
         .then(setCuratorCandidates)
         .catch(() => setCuratorCandidates([]));
+      return;
+    }
+    if (task?.title === "Реєстрація в 1С, генерація пароля") {
+      setOnecPasswordError(null);
+      setOnecPasswordDialogTaskId(taskId);
       return;
     }
     if (task?.actionType === "TEST") {
@@ -993,6 +1068,42 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
       })
       .catch((e) => setCuratorError(e.message))
       .finally(() => setCuratorSubmitting(false));
+  };
+
+  const submitOnecPassword = (password: string) => {
+    if (!onecPasswordDialogTaskId) return;
+    setOnecPasswordSubmitting(true);
+    fetch(`/api/tasks/${onecPasswordDialogTaskId}/complete`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ onecPassword: password }),
+    })
+      .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
+      .then(({ ok, body }) => {
+        if (!ok) throw new Error(body.error ?? "Не вдалося зберегти пароль");
+        setOnecPasswordDialogTaskId(null);
+        loadOnboarding();
+        loadDetail();
+      })
+      .catch((e) => setOnecPasswordError(e.message))
+      .finally(() => setOnecPasswordSubmitting(false));
+  };
+
+  const submitOnecReissue = (password: string) => {
+    setOnecReissueSubmitting(true);
+    setOnecReissueError(null);
+    fetch(`/api/employees/${employmentId}/onec-password/reissue`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password }),
+    })
+      .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
+      .then(({ ok, body }) => {
+        if (!ok) throw new Error(body.error ?? "Не вдалося перевидати пароль");
+        setOnecReissueOpen(false);
+      })
+      .catch((e) => setOnecReissueError(e.message))
+      .finally(() => setOnecReissueSubmitting(false));
   };
 
   // ── Переведення ──
@@ -1689,6 +1800,40 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
               >
                 <Checklist tasks={onboarding.tasks} myEmploymentIds={myEmploymentIds} onToggle={completeTask} busyTaskId={busyTaskId} />
               </Section>
+            )}
+            {onboarding?.tasks.some((t) => t.title === "Реєстрація в 1С, генерація пароля" && t.status === "DONE") && (
+              <div className="flex flex-wrap items-center justify-between gap-2 border border-slate-200 bg-white rounded-md px-4 py-3">
+                <p className="text-sm text-slate-600">
+                  Пароль від 1С і каси видано. Якщо його загублено чи потрібно оновити — перевидайте новий, старий стане недійсним.
+                </p>
+                <button
+                  onClick={() => {
+                    setOnecReissueError(null);
+                    setOnecReissueOpen(true);
+                  }}
+                  className="shrink-0 rounded border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  Перевидати пароль 1С
+                </button>
+              </div>
+            )}
+            {onecPasswordDialogTaskId && (
+              <OnecPasswordDialog
+                title="Реєстрація в 1С, генерація пароля"
+                submitting={onecPasswordSubmitting}
+                error={onecPasswordError}
+                onClose={() => setOnecPasswordDialogTaskId(null)}
+                onSubmit={submitOnecPassword}
+              />
+            )}
+            {onecReissueOpen && (
+              <OnecPasswordDialog
+                title="Перевидати пароль 1С"
+                submitting={onecReissueSubmitting}
+                error={onecReissueError}
+                onClose={() => setOnecReissueOpen(false)}
+                onSubmit={submitOnecReissue}
+              />
             )}
             {curatorDialogTaskId && (
               <CuratorDialog

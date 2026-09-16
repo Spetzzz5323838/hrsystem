@@ -5,8 +5,11 @@ import { queueTelegramMessage, registerTelegramMessageWorker } from "../lib/noti
 import { getBoss } from "../lib/queue";
 import { checkSlaEscalations } from "../lib/sla";
 import { runPeriodicBadgeChecks } from "../lib/badges-periodic";
+import { cleanupExpiredDocuments } from "../lib/document-retention";
 import { acknowledgeReview } from "../lib/review";
 import { checkVacationConflicts, createVacationRequest, type ConflictCheck } from "../lib/vacation";
+import { deliverOnecPassword } from "../lib/onecPassword";
+import { ONEC_PASSWORD_DELIVERY_QUEUE } from "../lib/notifications";
 import { EmploymentStatus, Prisma, Role, VacationType } from "../generated/prisma/client";
 
 const token = process.env.TELEGRAM_BOT_TOKEN;
@@ -357,6 +360,17 @@ bot.on("message:contact", async (ctx) => {
 
   const phone = normalizePhone(ctx.message.contact.phone_number);
 
+  const existingPerson = await prisma.person.findUnique({ where: { phone } });
+  if (existingPerson) {
+    await ctx.reply(
+      "Цей номер телефону вже зареєстровано в системі. Якщо це ваш акаунт — напишіть /link, щоб прив'язати Telegram. " +
+        "Якщо це помилка — зверніться до адміністратора об'єкта.",
+      { reply_markup: { remove_keyboard: true } },
+    );
+    registrations.delete(ctx.from.id);
+    return;
+  }
+
   try {
     await prisma.pendingHire.create({
       data: {
@@ -441,6 +455,7 @@ bot.catch((err) => {
 
 const SLA_CHECK_QUEUE = "sla-escalation-check";
 const BADGE_CHECK_QUEUE = "periodic-badge-check";
+const DOCUMENT_RETENTION_QUEUE = "document-retention-cleanup";
 
 /**
  * Черга й планувальник живуть у процесі бота (не окремим третім
@@ -459,6 +474,20 @@ async function setupQueue() {
   await boss.createQueue(BADGE_CHECK_QUEUE);
   await boss.work(BADGE_CHECK_QUEUE, () => runPeriodicBadgeChecks());
   await boss.schedule(BADGE_CHECK_QUEUE, "0 3 * * *"); // раз на добу о 3:00
+
+  await boss.createQueue(ONEC_PASSWORD_DELIVERY_QUEUE);
+  await boss.work<{ employmentId: number }>(ONEC_PASSWORD_DELIVERY_QUEUE, async (jobs) => {
+    for (const job of jobs) {
+      await deliverOnecPassword(job.data.employmentId);
+    }
+  });
+
+  await boss.createQueue(DOCUMENT_RETENTION_QUEUE);
+  await boss.work(DOCUMENT_RETENTION_QUEUE, async () => {
+    const { deletedCount } = await cleanupExpiredDocuments();
+    if (deletedCount > 0) console.log(`Автоочищення сканів: видалено ${deletedCount}.`);
+  });
+  await boss.schedule(DOCUMENT_RETENTION_QUEUE, "0 4 * * *"); // раз на добу о 4:00
 
   console.log("Черга й заплановані перевірки піднято.");
 }

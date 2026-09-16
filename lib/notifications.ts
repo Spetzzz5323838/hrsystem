@@ -2,8 +2,10 @@ import { getBoss } from "./queue";
 import { sendTelegramMessage } from "./telegram";
 
 export const TELEGRAM_MESSAGE_QUEUE = "telegram-message";
+export const ONEC_PASSWORD_DELIVERY_QUEUE = "onec-password-delivery";
 
 type TelegramMessageJob = { telegramId: string; text: string; replyMarkup?: unknown };
+type OnecPasswordDeliveryJob = { employmentId: number };
 
 /**
  * Кладе повідомлення в чергу замість прямої відправки — pg-boss дає
@@ -18,6 +20,22 @@ export async function queueTelegramMessage(telegramId: bigint, text: string, rep
   const boss = await getBoss();
   await boss.createQueue(TELEGRAM_MESSAGE_QUEUE);
   await boss.send(TELEGRAM_MESSAGE_QUEUE, { telegramId: telegramId.toString(), text, replyMarkup } satisfies TelegramMessageJob, {
+    retryLimit: 5,
+    retryBackoff: true,
+  });
+}
+
+/**
+ * У чергу кладеться лише employmentId, не сам пароль і не готова картинка
+ * — розшифрування й генерація штрихкода відбуваються заново в
+ * lib/onecPassword.ts::deliverOnecPassword, безпосередньо перед
+ * відправкою (воркер зареєстрований у bot/index.ts, бо там же й
+ * Bot API — той самий принцип, що й для щоденних перевірок бейджів/SLA).
+ */
+export async function queueOnecPasswordDelivery(employmentId: number): Promise<void> {
+  const boss = await getBoss();
+  await boss.createQueue(ONEC_PASSWORD_DELIVERY_QUEUE);
+  await boss.send(ONEC_PASSWORD_DELIVERY_QUEUE, { employmentId } satisfies OnecPasswordDeliveryJob, {
     retryLimit: 5,
     retryBackoff: true,
   });

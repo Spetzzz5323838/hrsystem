@@ -57,3 +57,7 @@ export async function saveDocument(input: SaveDocumentInput): Promise<{ ok: true
 export async function readDocumentFile(filePath: string): Promise<Buffer> {
   return fs.readFile(filePath);
 }
+
+export async function deleteDocumentFile(filePath: string): Promise<void> {
+  await fs.rm(filePath, { force: true });
+}
