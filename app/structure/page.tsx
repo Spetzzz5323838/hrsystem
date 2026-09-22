@@ -270,11 +270,30 @@ export default function StructurePage() {
   const [moveTargetId, setMoveTargetId] = useState<number | null>(null);
   const [moveBusy, setMoveBusy] = useState(false);
 
+  type DirectStaffUnit = { id: number; positionProfileId: number; positionTitle: string; plannedHeadcount: number; actualCount: number };
+  const [directStaffUnits, setDirectStaffUnits] = useState<DirectStaffUnit[] | null>(null);
+  const [allPositions, setAllPositions] = useState<{ id: number; title: string }[]>([]);
+  const [newSuPositionId, setNewSuPositionId] = useState<number | "">("");
+  const [newSuPlanned, setNewSuPlanned] = useState("1");
+  const [suError, setSuError] = useState<string | null>(null);
+  const [suBusyId, setSuBusyId] = useState<number | "new" | null>(null);
+
+  const loadDirectStaffUnits = (nodeId: number) => {
+    fetch(`/api/staff-units?orgNodeId=${nodeId}`)
+      .then((r) => r.json())
+      .then(setDirectStaffUnits)
+      .catch(() => setDirectStaffUnits([]));
+  };
+
   useEffect(() => {
     fetch("/api/me")
       .then((r) => (r.ok ? r.json() : null))
       .then((me) => setCanManage(!!me?.grants?.some((g: { capability: string }) => g.capability === "MANAGE_ORG_STRUCTURE")))
       .catch(() => setCanManage(false));
+    fetch("/api/position-profiles")
+      .then((r) => (r.ok ? r.json() : []))
+      .then((list: { id: number; title: string }[]) => setAllPositions(list))
+      .catch(() => setAllPositions([]));
   }, []);
 
   const loadTree = () => {
@@ -317,6 +336,10 @@ export default function StructurePage() {
   useEffect(() => {
     if (selectedId == null) return;
     loadStaffing(selectedId);
+    loadDirectStaffUnits(selectedId);
+    setSuError(null);
+    setNewSuPositionId("");
+    setNewSuPlanned("1");
     setEditError(null);
     setMoveTargetId(null);
 
@@ -455,6 +478,61 @@ export default function StructurePage() {
       .then(() => loadStaffing(staffing.node.id))
       .catch((e) => setEditError(e.message))
       .finally(() => setMoveBusy(false));
+  };
+
+  const createStaffUnit = () => {
+    if (!staffing || newSuPositionId === "") return;
+    setSuBusyId("new");
+    setSuError(null);
+    fetch("/api/staff-units", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ positionProfileId: newSuPositionId, orgNodeId: staffing.node.id, plannedHeadcount: Number(newSuPlanned) || 1 }),
+    })
+      .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
+      .then(({ ok, body }) => {
+        if (!ok) throw new Error(body.error ?? "Не вдалося додати посаду");
+        setNewSuPositionId("");
+        setNewSuPlanned("1");
+        loadDirectStaffUnits(staffing.node.id);
+        loadStaffing(staffing.node.id);
+      })
+      .catch((e) => setSuError(e.message))
+      .finally(() => setSuBusyId(null));
+  };
+
+  const updateStaffUnitPlan = (id: number, plannedHeadcount: number) => {
+    if (!staffing) return;
+    setSuBusyId(id);
+    setSuError(null);
+    fetch(`/api/staff-units/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ plannedHeadcount }),
+    })
+      .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
+      .then(({ ok, body }) => {
+        if (!ok) throw new Error(body.error ?? "Не вдалося зберегти");
+        loadDirectStaffUnits(staffing.node.id);
+        loadStaffing(staffing.node.id);
+      })
+      .catch((e) => setSuError(e.message))
+      .finally(() => setSuBusyId(null));
+  };
+
+  const deleteStaffUnit = (id: number) => {
+    if (!staffing) return;
+    setSuBusyId(id);
+    setSuError(null);
+    fetch(`/api/staff-units/${id}`, { method: "DELETE" })
+      .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
+      .then(({ ok, body }) => {
+        if (!ok) throw new Error(body.error ?? "Не вдалося видалити");
+        loadDirectStaffUnits(staffing.node.id);
+        loadStaffing(staffing.node.id);
+      })
+      .catch((e) => setSuError(e.message))
+      .finally(() => setSuBusyId(null));
   };
 
   return (
@@ -615,6 +693,86 @@ export default function StructurePage() {
                     </tbody>
                   </table>
                 </Section>
+
+                {canManage && (
+                  <Section title="Штатні одиниці цього вузла" right={<span className="text-xs text-slate-400">редагування (не по піддереву)</span>}>
+                    {suError && <p className="px-4 pt-3 text-sm text-rose-700">{suError}</p>}
+                    <table className="w-full text-sm">
+                      <thead className="border-b border-slate-200 bg-slate-50 text-left text-xs text-slate-500">
+                        <tr>
+                          <th className="px-4 py-2 font-medium">Посада</th>
+                          <th className="px-4 py-2 font-medium text-right">План</th>
+                          <th className="px-4 py-2 font-medium text-right">Факт</th>
+                          <th className="px-4 py-2" />
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {(directStaffUnits ?? []).map((su) => (
+                          <tr key={su.id}>
+                            <td className="px-4 py-2 text-slate-800">{su.positionTitle}</td>
+                            <td className="px-4 py-2 text-right">
+                              <input
+                                key={su.id + "-" + su.plannedHeadcount}
+                                type="number"
+                                min={1}
+                                defaultValue={su.plannedHeadcount}
+                                disabled={suBusyId === su.id}
+                                onBlur={(e) => Number(e.target.value) !== su.plannedHeadcount && Number(e.target.value) >= 1 && updateStaffUnitPlan(su.id, Number(e.target.value))}
+                                className="w-16 rounded border border-slate-300 px-1.5 py-0.5 text-right tabular-nums"
+                              />
+                            </td>
+                            <td className="px-4 py-2 text-right tabular-nums text-slate-600">{su.actualCount}</td>
+                            <td className="px-4 py-2 text-right">
+                              <button
+                                disabled={suBusyId === su.id}
+                                onClick={() => deleteStaffUnit(su.id)}
+                                className="text-xs text-rose-600 hover:text-rose-800 disabled:opacity-40"
+                              >
+                                видалити
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                        {directStaffUnits && !directStaffUnits.length && (
+                          <tr>
+                            <td colSpan={4} className="px-4 py-6 text-center text-sm text-slate-500">
+                              Тут ще немає власних штатних одиниць (не плутати з табличкою вище — та показує суму по всьому піддереву).
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+
+                    <div className="flex flex-wrap items-end gap-2 border-t border-slate-100 px-4 py-3">
+                      <select
+                        value={newSuPositionId}
+                        onChange={(e) => setNewSuPositionId(e.target.value ? Number(e.target.value) : "")}
+                        className="rounded border border-slate-300 px-2 py-1.5 text-sm"
+                      >
+                        <option value="">Оберіть посаду…</option>
+                        {allPositions.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.title}
+                          </option>
+                        ))}
+                      </select>
+                      <input
+                        type="number"
+                        min={1}
+                        value={newSuPlanned}
+                        onChange={(e) => setNewSuPlanned(e.target.value)}
+                        className="w-16 rounded border border-slate-300 px-2 py-1.5 text-sm"
+                      />
+                      <button
+                        disabled={newSuPositionId === "" || suBusyId === "new"}
+                        onClick={createStaffUnit}
+                        className="rounded bg-slate-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50"
+                      >
+                        Додати в штатний розпис
+                      </button>
+                    </div>
+                  </Section>
+                )}
 
                 <Section title="QR-код реєстрації">
                   {qrError && <p className="px-4 py-3 text-sm text-rose-700">{qrError}</p>}

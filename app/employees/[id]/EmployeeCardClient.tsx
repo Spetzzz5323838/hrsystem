@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { AlertTriangle, ArrowLeft, Award, Check, Clock, Eye, Lock, Phone, Star, ThumbsDown, ThumbsUp, X } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Award, Camera, Check, Clock, Eye, Lock, Phone, Star, ThumbsDown, ThumbsUp, X } from "lucide-react";
 import AppShell from "../../components/AppShell";
 
 type CompetencyRow = {
@@ -34,9 +34,12 @@ type Detail = {
   hiredAt: string | null;
   terminatedAt: string | null;
   curatorName: string | null;
+  staffUnitId: number;
   competencies: CompetencyRow[];
   bonusCompetencies: BonusCompetencyRow[];
 };
+
+const PRE_ACTIVE_STATUSES = new Set(["REGISTERED", "ACTIVATED", "DOCUMENTS_PENDING", "TRAINEE", "READY_FOR_ATTESTATION"]);
 
 const STATUS_LABELS: Record<string, { label: string; cls: string }> = {
   REGISTERED: { label: "Зареєстрований", cls: "bg-slate-100 text-slate-700 border-slate-300" },
@@ -80,6 +83,72 @@ function Avatar({ name, size = 40 }: { name: string; size?: number }) {
     >
       {ini}
     </span>
+  );
+}
+
+/**
+ * Аватарка профілю (правки 20.09.2026, п.5) — фото лишається лише тут (не
+ * на бейджі). Без клієнтської перевірки прав, той самий принцип, що й інші
+ * гейтовані кнопки на цій сторінці: сервер сам поверне 403 на <img>
+ * (тихо падає в fallback-ініціали) чи на POST (текст помилки під кнопкою).
+ */
+function ProfileAvatar({ employmentId, fullName, size = 56 }: { employmentId: string; fullName: string; size?: number }) {
+  const [photoOk, setPhotoOk] = useState(true);
+  const [version, setVersion] = useState(0);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const upload = (file: File) => {
+    setUploading(true);
+    setUploadError(null);
+    const body = new FormData();
+    body.append("file", file);
+    fetch(`/api/employees/${employmentId}/avatar`, { method: "POST", body })
+      .then((r) => r.json().then((b) => ({ ok: r.ok, b })))
+      .then(({ ok, b }) => {
+        if (!ok) throw new Error(b.error ?? "Не вдалося завантажити фото");
+        setPhotoOk(true);
+        setVersion((v) => v + 1);
+      })
+      .catch((e) => setUploadError(e.message))
+      .finally(() => setUploading(false));
+  };
+
+  return (
+    <div className="relative shrink-0" style={{ width: size, height: size }}>
+      {photoOk ? (
+        <img
+          src={`/api/employees/${employmentId}/avatar?v=${version}`}
+          alt=""
+          onError={() => setPhotoOk(false)}
+          className="h-full w-full rounded-full object-cover"
+          style={{ width: size, height: size }}
+        />
+      ) : (
+        <Avatar name={fullName} size={size} />
+      )}
+      <button
+        onClick={() => inputRef.current?.click()}
+        disabled={uploading}
+        title="Змінити фото"
+        className="absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full border border-white bg-slate-700 text-white hover:bg-slate-600 disabled:opacity-50"
+      >
+        <Camera size={11} />
+      </button>
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/jpeg,image/png"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) upload(file);
+          e.target.value = "";
+        }}
+      />
+      {uploadError && <p className="absolute top-full mt-1 w-40 text-[10px] text-rose-700">{uploadError}</p>}
+    </div>
   );
 }
 
@@ -188,12 +257,22 @@ function Checklist({
   onToggle,
   busyTaskId,
   employmentId,
+  employeeStatus,
+  onEditProfileFields,
+  canForceComplete,
+  onForceComplete,
+  forceCompleteBusyId,
 }: {
   tasks: TaskRow[];
   myEmploymentIds: number[];
   onToggle: (taskId: number) => void;
   busyTaskId: number | null;
   employmentId?: string;
+  employeeStatus?: string;
+  onEditProfileFields?: () => void;
+  canForceComplete?: boolean;
+  onForceComplete?: (taskId: number) => void;
+  forceCompleteBusyId?: number | null;
 }) {
   const firstOpen = tasks.findIndex((t) => t.status !== "DONE" && t.isBlocking);
 
@@ -237,6 +316,18 @@ function Checklist({
                     друкувати бейдж
                   </a>
                 )}
+                {done &&
+                  t.title === "Заповнення профілю: посада, відділ, дата виходу" &&
+                  employeeStatus &&
+                  PRE_ACTIVE_STATUSES.has(employeeStatus) &&
+                  onEditProfileFields && (
+                    <button
+                      onClick={onEditProfileFields}
+                      className="text-xs text-slate-500 underline underline-offset-2 hover:text-slate-800"
+                    >
+                      редагувати профіль
+                    </button>
+                  )}
               </div>
               <p className="mt-1 text-xs text-slate-500">
                 {done ? `Виконано ${fmtDateTime(t.completedAt)}` : t.dueAt ? `Норматив до ${fmtDateTime(t.dueAt)}` : "Автоматично"}
@@ -254,8 +345,18 @@ function Checklist({
                     {ACTION_LABEL[t.actionType] ?? "Виконано"}
                   </button>
                 ) : (
-                  <span className="text-xs text-slate-400">
+                  <span className="flex items-center gap-2 text-xs text-slate-400">
                     {t.blocked ? "Очікує попередній крок" : t.assigneeName ? `Виконує ${t.assigneeName}` : "Виконавця не призначено"}
+                    {canForceComplete && !t.blocked && onForceComplete && (
+                      <button
+                        disabled={forceCompleteBusyId === t.taskId}
+                        onClick={() => onForceComplete(t.taskId)}
+                        className="text-rose-600 underline underline-offset-2 hover:text-rose-800 disabled:opacity-40"
+                        title="Сисадмін: завершити примусово, якщо виконавець недоступний"
+                      >
+                        завершити примусово
+                      </button>
+                    )}
                   </span>
                 ))}
               {done && <Check size={16} className="text-emerald-600" />}
@@ -276,6 +377,7 @@ const TABS = [
   ["rating", "Рейтинг"],
   ["review", "Квартальна оцінка"],
   ["vac", "Відпустки"],
+  ["reminders", "Задачі"],
   ["equip", "Обладнання"],
   ["hist", "Історія"],
 ] as const;
@@ -502,6 +604,154 @@ function OnecPasswordDialog({
             }`}
           >
             Зберегти й надіслати
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CabinetPasswordResetDialog({
+  submitting,
+  error,
+  result,
+  onClose,
+  onConfirm,
+}: {
+  submitting: boolean;
+  error: string | null;
+  result: { password: string; sentViaBot: boolean } | null;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-20 flex items-center justify-center bg-slate-900/40 px-4">
+      <div className="w-full max-w-sm rounded-md bg-white p-5">
+        <div className="flex items-start justify-between">
+          <h3 className="text-lg font-semibold text-slate-900">Скинути пароль кабінету</h3>
+          <button onClick={onClose}>
+            <X size={18} className="text-slate-400" />
+          </button>
+        </div>
+
+        {!result ? (
+          <>
+            <p className="mt-3 text-sm text-slate-600">
+              Буде згенеровано новий пароль для входу в кабінет (веб і Telegram). Старий пароль одразу стане недійсним.
+            </p>
+            {error && <p className="mt-3 text-sm text-rose-700">{error}</p>}
+            <div className="mt-4 flex justify-end gap-2">
+              <button onClick={onClose} className="rounded border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-50">
+                Скасувати
+              </button>
+              <button
+                disabled={submitting}
+                onClick={onConfirm}
+                className={`rounded px-3 py-1.5 text-sm font-medium text-white ${
+                  submitting ? "cursor-not-allowed bg-slate-300" : "bg-slate-800 hover:bg-slate-700"
+                }`}
+              >
+                Скинути пароль
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <p className="mt-3 text-sm text-slate-600">Новий пароль:</p>
+            <p className="mt-1 rounded border border-slate-300 bg-slate-50 px-3 py-2 text-center font-mono text-lg tracking-wider">{result.password}</p>
+            <p className="mt-2 text-xs text-slate-500">
+              {result.sentViaBot ? "Також надіслано працівнику в Telegram." : "Працівник не прив'язав Telegram — передайте пароль особисто."}
+            </p>
+            <div className="mt-4 flex justify-end">
+              <button onClick={onClose} className="rounded bg-slate-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-700">
+                Готово
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ProfileFieldsDialog({
+  staffUnits,
+  initial,
+  submitting,
+  error,
+  onClose,
+  onSubmit,
+}: {
+  staffUnits: { id: number; positionTitle: string; objectName: string }[];
+  initial: { staffUnitId: number; hiredAt: string | null; birthDate: string | null };
+  submitting: boolean;
+  error: string | null;
+  onClose: () => void;
+  onSubmit: (patch: { staffUnitId: number; hiredAt: string; birthDate: string }) => void;
+}) {
+  const [staffUnitId, setStaffUnitId] = useState(initial.staffUnitId);
+  const [hiredAt, setHiredAt] = useState(initial.hiredAt?.slice(0, 10) ?? "");
+  const [birthDate, setBirthDate] = useState(initial.birthDate?.slice(0, 10) ?? "");
+
+  return (
+    <div className="fixed inset-0 z-20 flex items-center justify-center bg-slate-900/40 px-4">
+      <div className="w-full max-w-sm rounded-md bg-white p-5">
+        <div className="flex items-start justify-between">
+          <h3 className="text-lg font-semibold text-slate-900">Редагувати профіль працівника</h3>
+          <button onClick={onClose}>
+            <X size={18} className="text-slate-400" />
+          </button>
+        </div>
+
+        <label className="mt-4 block">
+          <span className="text-sm text-slate-700">Посада, відділ</span>
+          <select
+            value={staffUnitId}
+            onChange={(e) => setStaffUnitId(Number(e.target.value))}
+            className="mt-1 w-full rounded border border-slate-300 px-2 py-1.5 text-sm"
+          >
+            {staffUnits.map((su) => (
+              <option key={su.id} value={su.id}>
+                {su.positionTitle} — {su.objectName}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="mt-3 block">
+          <span className="text-sm text-slate-700">Дата виходу (прийняття на роботу)</span>
+          <input
+            type="date"
+            value={hiredAt}
+            onChange={(e) => setHiredAt(e.target.value)}
+            className="mt-1 w-full rounded border border-slate-300 px-2 py-1.5 text-sm"
+          />
+        </label>
+
+        <label className="mt-3 block">
+          <span className="text-sm text-slate-700">Дата народження</span>
+          <input
+            type="date"
+            value={birthDate}
+            onChange={(e) => setBirthDate(e.target.value)}
+            className="mt-1 w-full rounded border border-slate-300 px-2 py-1.5 text-sm"
+          />
+        </label>
+
+        {error && <p className="mt-3 text-sm text-rose-700">{error}</p>}
+
+        <div className="mt-4 flex justify-end gap-2">
+          <button onClick={onClose} className="rounded border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-50">
+            Скасувати
+          </button>
+          <button
+            disabled={submitting || !hiredAt}
+            onClick={() => onSubmit({ staffUnitId, hiredAt, birthDate })}
+            className={`rounded px-3 py-1.5 text-sm font-medium text-white ${
+              submitting || !hiredAt ? "cursor-not-allowed bg-slate-300" : "bg-slate-800 hover:bg-slate-700"
+            }`}
+          >
+            Зберегти
           </button>
         </div>
       </div>
@@ -870,6 +1120,25 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
   const [onboarding, setOnboarding] = useState<OnboardingData | null>(null);
   const [onboardingError, setOnboardingError] = useState<string | null>(null);
   const [myEmploymentIds, setMyEmploymentIds] = useState<number[]>([]);
+  const [canForceComplete, setCanForceComplete] = useState(false);
+  const [forceCompleteBusyId, setForceCompleteBusyId] = useState<number | null>(null);
+  const [forceCompleteError, setForceCompleteError] = useState<string | null>(null);
+
+  const forceCompleteTask = (taskId: number) => {
+    if (!confirm("Примусово завершити цей пункт чек-листа?")) return;
+    setForceCompleteBusyId(taskId);
+    setForceCompleteError(null);
+    fetch(`/api/tasks/${taskId}/force-complete`, { method: "POST" })
+      .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
+      .then(({ ok, body }) => {
+        if (!ok) throw new Error(body.error ?? "Не вдалося виконати примусово");
+        loadOnboarding();
+        loadTransfer();
+        loadTermination();
+      })
+      .catch((e) => setForceCompleteError(e.message))
+      .finally(() => setForceCompleteBusyId(null));
+  };
   const [busyTaskId, setBusyTaskId] = useState<number | null>(null);
   const [starting, setStarting] = useState(false);
 
@@ -893,7 +1162,10 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
 
     fetch("/api/me")
       .then((r) => (r.ok ? r.json() : null))
-      .then((me) => setMyEmploymentIds(me?.employmentIds ?? []))
+      .then((me) => {
+        setMyEmploymentIds(me?.employmentIds ?? []);
+        setCanForceComplete(!!me?.grants?.some((g: { capability: string }) => g.capability === "FORCE_COMPLETE_TASK"));
+      })
       .catch(() => {});
 
     fetch("/api/freeze-reasons")
@@ -991,6 +1263,34 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
   const [onecReissueError, setOnecReissueError] = useState<string | null>(null);
   const [onecReissueSubmitting, setOnecReissueSubmitting] = useState(false);
 
+  const [cabinetPasswordOpen, setCabinetPasswordOpen] = useState(false);
+  const [cabinetPasswordError, setCabinetPasswordError] = useState<string | null>(null);
+  const [cabinetPasswordSubmitting, setCabinetPasswordSubmitting] = useState(false);
+  const [cabinetPasswordResult, setCabinetPasswordResult] = useState<{ password: string; sentViaBot: boolean } | null>(null);
+
+  const [profileFieldsOpen, setProfileFieldsOpen] = useState(false);
+  const [profileFieldsError, setProfileFieldsError] = useState<string | null>(null);
+  const [profileFieldsSubmitting, setProfileFieldsSubmitting] = useState(false);
+
+  const submitProfileFields = (patch: { staffUnitId: number; hiredAt: string; birthDate: string }) => {
+    setProfileFieldsSubmitting(true);
+    setProfileFieldsError(null);
+    fetch(`/api/employees/${employmentId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ staffUnitId: patch.staffUnitId, hiredAt: patch.hiredAt, birthDate: patch.birthDate || null }),
+    })
+      .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
+      .then(({ ok, body }) => {
+        if (!ok) throw new Error(body.error ?? "Не вдалося зберегти");
+        setProfileFieldsOpen(false);
+        loadDetail();
+        loadOnboarding();
+      })
+      .catch((e) => setProfileFieldsError(e.message))
+      .finally(() => setProfileFieldsSubmitting(false));
+  };
+
   type PendingChecklistTask = {
     taskId: number;
     title: string;
@@ -1008,6 +1308,11 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
         setTab(redirectTab);
         return;
       }
+    }
+    if (task?.title === "Заповнення профілю: посада, відділ, дата виходу") {
+      setProfileFieldsError(null);
+      setProfileFieldsOpen(true);
+      return;
     }
     if (task?.title === "Призначення куратора") {
       setCuratorError(null);
@@ -1116,6 +1421,19 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
       })
       .catch((e) => setOnecReissueError(e.message))
       .finally(() => setOnecReissueSubmitting(false));
+  };
+
+  const submitCabinetPasswordReset = () => {
+    setCabinetPasswordSubmitting(true);
+    setCabinetPasswordError(null);
+    fetch(`/api/employees/${employmentId}/reset-cabinet-password`, { method: "POST" })
+      .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
+      .then(({ ok, body }) => {
+        if (!ok) throw new Error(body.error ?? "Не вдалося скинути пароль");
+        setCabinetPasswordResult({ password: body.password, sentViaBot: body.sentViaBot });
+      })
+      .catch((e) => setCabinetPasswordError(e.message))
+      .finally(() => setCabinetPasswordSubmitting(false));
   };
 
   // ── Переведення ──
@@ -1345,6 +1663,38 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
       .finally(() => setUploading(false));
   };
 
+  const [documentBusyId, setDocumentBusyId] = useState<number | null>(null);
+  const [documentActionError, setDocumentActionError] = useState<string | null>(null);
+
+  const deleteDocumentRow = (id: number) => {
+    if (!confirm("Видалити цей документ?")) return;
+    setDocumentBusyId(id);
+    setDocumentActionError(null);
+    fetch(`/api/documents/${id}`, { method: "DELETE" })
+      .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
+      .then(({ ok, body }) => {
+        if (!ok) throw new Error(body.error ?? "Не вдалося видалити");
+        loadDocuments();
+      })
+      .catch((e) => setDocumentActionError(e.message))
+      .finally(() => setDocumentBusyId(null));
+  };
+
+  const replaceDocumentRow = (id: number, file: File) => {
+    setDocumentBusyId(id);
+    setDocumentActionError(null);
+    const form = new FormData();
+    form.append("file", file);
+    fetch(`/api/documents/${id}`, { method: "PATCH", body: form })
+      .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
+      .then(({ ok, body }) => {
+        if (!ok) throw new Error(body.error ?? "Не вдалося замінити файл");
+        loadDocuments();
+      })
+      .catch((e) => setDocumentActionError(e.message))
+      .finally(() => setDocumentBusyId(null));
+  };
+
   // ── Обладнання ──
   const [equipment, setEquipment] = useState<{ id: number; inventoryNo: string; name: string; assignedAt: string | null }[] | null>(null);
   const [equipmentHistory, setEquipmentHistory] = useState<
@@ -1537,6 +1887,62 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
       .finally(() => setBonusSubmitting(false));
   };
 
+  // ── Кураторство "з людини" (правки 20.09.2026, п.9) — для яких посад
+  // САМЕ ЦЯ людина може бути куратором, окремо від прапорця на посаді.
+  type CuratorEligibilityRow = { positionProfileId: number; positionTitle: string; createdAt: string };
+  const [curatorEligibilities, setCuratorEligibilities] = useState<CuratorEligibilityRow[] | null>(null);
+  const [curatorEligPositions, setCuratorEligPositions] = useState<{ id: number; title: string }[]>([]);
+  const [curatorEligAddId, setCuratorEligAddId] = useState("");
+  const [curatorEligBusy, setCuratorEligBusy] = useState(false);
+  const [curatorEligError, setCuratorEligError] = useState<string | null>(null);
+
+  const loadCuratorEligibilities = () => {
+    fetch(`/api/employees/${employmentId}/curator-eligibility`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then(setCuratorEligibilities)
+      .catch(() => setCuratorEligibilities([]));
+  };
+
+  useEffect(() => {
+    loadCuratorEligibilities();
+    fetch("/api/position-profiles")
+      .then((r) => (r.ok ? r.json() : []))
+      .then((list: { id: number; title: string }[]) => setCuratorEligPositions(list))
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [employmentId]);
+
+  const addCuratorEligibility = () => {
+    if (!curatorEligAddId) return;
+    setCuratorEligBusy(true);
+    setCuratorEligError(null);
+    fetch(`/api/employees/${employmentId}/curator-eligibility`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ positionProfileId: Number(curatorEligAddId) }),
+    })
+      .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
+      .then(({ ok, body }) => {
+        if (!ok) throw new Error(body.error ?? "Не вдалося додати");
+        setCuratorEligAddId("");
+        loadCuratorEligibilities();
+      })
+      .catch((e) => setCuratorEligError(e.message))
+      .finally(() => setCuratorEligBusy(false));
+  };
+
+  const removeCuratorEligibility = (positionProfileId: number) => {
+    setCuratorEligBusy(true);
+    fetch(`/api/employees/${employmentId}/curator-eligibility/${positionProfileId}`, { method: "DELETE" })
+      .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
+      .then(({ ok, body }) => {
+        if (!ok) throw new Error(body.error);
+        loadCuratorEligibilities();
+      })
+      .catch((e) => setCuratorEligError(e.message))
+      .finally(() => setCuratorEligBusy(false));
+  };
+
   // ── Квартальна оцінка (docs v1.3 §4) ──
   type ReviewCriterionRow = { code: string; label: string; score: number; weight: number };
   type ReviewRow = {
@@ -1689,6 +2095,78 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
       .finally(() => setVacBusyId(null));
   };
 
+  type ReminderRow = { id: number; text: string; dueAt: string | null; isDone: boolean; doneAt: string | null; createdAt: string };
+  const [reminders, setReminders] = useState<ReminderRow[] | null>(null);
+  const [reminderError, setReminderError] = useState<string | null>(null);
+  const [reminderText, setReminderText] = useState("");
+  const [reminderDue, setReminderDue] = useState("");
+  const [reminderSubmitting, setReminderSubmitting] = useState(false);
+  const [reminderBusyId, setReminderBusyId] = useState<number | null>(null);
+  const [reminderShowDone, setReminderShowDone] = useState(false);
+
+  const loadReminders = () => {
+    fetch(`/api/employees/${employmentId}/reminders`)
+      .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
+      .then(({ ok, body }) => {
+        if (!ok) throw new Error(body.error ?? "Не вдалося завантажити задачі");
+        setReminders(body);
+        setReminderError(null);
+      })
+      .catch((e) => setReminderError(e.message));
+  };
+
+  useEffect(() => {
+    loadReminders();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [employmentId]);
+
+  const submitReminder = () => {
+    if (!reminderText.trim()) return;
+    setReminderSubmitting(true);
+    fetch(`/api/employees/${employmentId}/reminders`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: reminderText.trim(), dueAt: reminderDue || null }),
+    })
+      .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
+      .then(({ ok, body }) => {
+        if (!ok) throw new Error(body.error ?? "Не вдалося створити задачу");
+        setReminderText("");
+        setReminderDue("");
+        loadReminders();
+      })
+      .catch((e) => setReminderError(e.message))
+      .finally(() => setReminderSubmitting(false));
+  };
+
+  const toggleReminder = (id: number, isDone: boolean) => {
+    setReminderBusyId(id);
+    fetch(`/api/reminders/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ isDone }),
+    })
+      .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
+      .then(({ ok, body }) => {
+        if (!ok) throw new Error(body.error);
+        loadReminders();
+      })
+      .catch((e) => setReminderError(e.message))
+      .finally(() => setReminderBusyId(null));
+  };
+
+  const removeReminder = (id: number) => {
+    setReminderBusyId(id);
+    fetch(`/api/reminders/${id}`, { method: "DELETE" })
+      .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
+      .then(({ ok, body }) => {
+        if (!ok) throw new Error(body.error);
+        loadReminders();
+      })
+      .catch((e) => setReminderError(e.message))
+      .finally(() => setReminderBusyId(null));
+  };
+
   if (error) {
     return (
       <AppShell active="/employees">
@@ -1716,7 +2194,7 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
 
         <div className="flex flex-wrap items-start justify-between gap-4 border border-slate-200 bg-white rounded-md p-4">
           <div className="flex gap-4">
-            <Avatar name={detail.fullName} size={56} />
+            <ProfileAvatar employmentId={employmentId} fullName={detail.fullName} size={56} />
             <div>
               <div className="flex flex-wrap items-center gap-3">
                 <h2 className="text-xl font-semibold text-slate-900">{detail.fullName}</h2>
@@ -1736,6 +2214,18 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
+            {detail.status !== "REGISTERED" && detail.status !== "TERMINATED" && (
+              <button
+                onClick={() => {
+                  setCabinetPasswordError(null);
+                  setCabinetPasswordResult(null);
+                  setCabinetPasswordOpen(true);
+                }}
+                className="rounded border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                Скинути пароль кабінету
+              </button>
+            )}
             {detail.status === "ACTIVE" && (
               <button
                 onClick={() => setFreezeDialogOpen(true)}
@@ -1755,6 +2245,16 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
             )}
           </div>
         </div>
+
+        {cabinetPasswordOpen && (
+          <CabinetPasswordResetDialog
+            submitting={cabinetPasswordSubmitting}
+            error={cabinetPasswordError}
+            result={cabinetPasswordResult}
+            onClose={() => setCabinetPasswordOpen(false)}
+            onConfirm={submitCabinetPasswordReset}
+          />
+        )}
 
         {freezeError && <p className="text-sm text-rose-700">{freezeError}</p>}
         {unfreezeResult && (
@@ -1793,6 +2293,7 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
         {tab === "process" && (
           <>
             {onboardingError && <p className="text-sm text-rose-700">{onboardingError}</p>}
+            {forceCompleteError && <p className="text-sm text-rose-700">{forceCompleteError}</p>}
             {!onboarding ? (
               <div className="border border-dashed border-slate-300 bg-white rounded-md px-6 py-12 text-center text-sm text-slate-500">
                 Завантаження…
@@ -1824,6 +2325,14 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
                   onToggle={completeTask}
                   busyTaskId={busyTaskId}
                   employmentId={employmentId}
+                  employeeStatus={detail?.status}
+                  onEditProfileFields={() => {
+                    setProfileFieldsError(null);
+                    setProfileFieldsOpen(true);
+                  }}
+                  canForceComplete={canForceComplete}
+                  onForceComplete={forceCompleteTask}
+                  forceCompleteBusyId={forceCompleteBusyId}
                 />
               </Section>
             )}
@@ -1859,6 +2368,16 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
                 error={onecReissueError}
                 onClose={() => setOnecReissueOpen(false)}
                 onSubmit={submitOnecReissue}
+              />
+            )}
+            {profileFieldsOpen && detail && (
+              <ProfileFieldsDialog
+                staffUnits={staffUnits}
+                initial={{ staffUnitId: detail.staffUnitId, hiredAt: detail.hiredAt, birthDate: detail.birthDate }}
+                submitting={profileFieldsSubmitting}
+                error={profileFieldsError}
+                onClose={() => setProfileFieldsOpen(false)}
+                onSubmit={submitProfileFields}
               />
             )}
             {curatorDialogTaskId && (
@@ -1948,6 +2467,9 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
                   myEmploymentIds={myEmploymentIds}
                   onToggle={completeTransferTaskClick}
                   busyTaskId={transferBusyTaskId}
+                  canForceComplete={canForceComplete}
+                  onForceComplete={forceCompleteTask}
+                  forceCompleteBusyId={forceCompleteBusyId}
                 />
               </Section>
             )}
@@ -2018,6 +2540,9 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
                     myEmploymentIds={myEmploymentIds}
                     onToggle={completeTerminationTaskClick}
                     busyTaskId={terminationBusyTaskId}
+                    canForceComplete={canForceComplete}
+                    onForceComplete={forceCompleteTask}
+                    forceCompleteBusyId={forceCompleteBusyId}
                   />
                 </Section>
 
@@ -2178,6 +2703,59 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
           </Section>
         )}
 
+        {tab === "comp" && (
+          <Section
+            title="Кураторство"
+            right={<span className="text-sm text-slate-500">для яких посад ця людина може навчати стажерів</span>}
+          >
+            <div className="divide-y divide-slate-100">
+              {(curatorEligibilities ?? []).map((c) => (
+                <div key={c.positionProfileId} className="flex items-center justify-between px-4 py-2 text-sm">
+                  <span className="text-slate-800">{c.positionTitle}</span>
+                  <button
+                    disabled={curatorEligBusy}
+                    onClick={() => removeCuratorEligibility(c.positionProfileId)}
+                    className="text-xs text-rose-600 hover:text-rose-800 disabled:opacity-40"
+                  >
+                    зняти
+                  </button>
+                </div>
+              ))}
+              {curatorEligibilities && !curatorEligibilities.length && (
+                <p className="px-4 py-6 text-center text-sm text-slate-500">
+                  Явних дозволів немає — кураторство визначається загальним прапорцем посади в довіднику.
+                </p>
+              )}
+            </div>
+            <div className="flex flex-wrap items-center gap-2 border-t border-slate-200 px-4 py-3">
+              <select
+                value={curatorEligAddId}
+                onChange={(e) => setCuratorEligAddId(e.target.value)}
+                className="rounded border border-slate-300 px-2 py-1.5 text-sm"
+              >
+                <option value="">— посада —</option>
+                {curatorEligPositions.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.title}
+                  </option>
+                ))}
+              </select>
+              <button
+                onClick={addCuratorEligibility}
+                disabled={!curatorEligAddId || curatorEligBusy}
+                className="rounded bg-slate-900 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+              >
+                Дозволити
+              </button>
+              {curatorEligError && <span className="text-sm text-rose-700">{curatorEligError}</span>}
+            </div>
+            <p className="border-t border-slate-100 px-4 py-2 text-xs text-slate-400">
+              Дозвіл дається лише якщо людина зараз має всі чинні обов&rsquo;язкові компетенції цієї посади — інакше система відхилить із поясненням,
+              яких саме компетенцій бракує.
+            </p>
+          </Section>
+        )}
+
         {tab === "docs" && (
           <div className="space-y-4">
             {pendingChecklistTask?.kind === "docs" && (
@@ -2239,6 +2817,7 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
                 </button>
               </div>
               {uploadError && <p className="px-4 pb-3 text-sm text-rose-700">{uploadError}</p>}
+              {documentActionError && <p className="px-4 pb-3 text-sm text-rose-700">{documentActionError}</p>}
             </Section>
 
             <Section title="Документи">
@@ -2275,14 +2854,37 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
                           )}
                         </td>
                         <td className="px-4 py-2.5 text-right">
-                          <a
-                            href={`/api/documents/${d.id}/file`}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="text-xs text-slate-500 underline underline-offset-2 hover:text-slate-800"
-                          >
-                            переглянути
-                          </a>
+                          <div className="flex items-center justify-end gap-2">
+                            <a
+                              href={`/api/documents/${d.id}/file`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-xs text-slate-500 underline underline-offset-2 hover:text-slate-800"
+                            >
+                              переглянути
+                            </a>
+                            <label className="cursor-pointer text-xs text-slate-500 underline underline-offset-2 hover:text-slate-800">
+                              замінити
+                              <input
+                                type="file"
+                                accept="application/pdf,image/jpeg,image/png"
+                                disabled={documentBusyId === d.id}
+                                onChange={(e) => {
+                                  const file = e.target.files?.[0];
+                                  if (file) replaceDocumentRow(d.id, file);
+                                  e.target.value = "";
+                                }}
+                                className="hidden"
+                              />
+                            </label>
+                            <button
+                              disabled={documentBusyId === d.id}
+                              onClick={() => deleteDocumentRow(d.id)}
+                              className="text-xs text-rose-600 underline underline-offset-2 hover:text-rose-800 disabled:opacity-40"
+                            >
+                              видалити
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -2678,6 +3280,86 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
                   </div>
                 ))}
                 {!(vacations ?? []).length && <p className="px-4 py-8 text-center text-sm text-slate-500">Заявок ще не було.</p>}
+              </div>
+            </Section>
+          </div>
+        )}
+
+        {tab === "reminders" && (
+          <div className="space-y-4">
+            {reminderError && <p className="text-sm text-rose-700">{reminderError}</p>}
+            <p className="text-xs text-slate-500">
+              Особисті нагадування «для себе» про цього працівника — бачите тільки ви, автор. Приходять і сюди, і в Telegram, коли настає термін.
+            </p>
+
+            <Section title="Нова задача">
+              <div className="flex flex-wrap items-end gap-3 px-4 py-3">
+                <div className="min-w-[220px] flex-1 space-y-1">
+                  <label className="block text-xs text-slate-600">Текст</label>
+                  <input
+                    type="text"
+                    value={reminderText}
+                    onChange={(e) => setReminderText(e.target.value)}
+                    placeholder="Наприклад: нагадати про довідку про несудимість"
+                    className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="block text-xs text-slate-600">Термін (необов&rsquo;язково)</label>
+                  <input
+                    type="date"
+                    value={reminderDue}
+                    onChange={(e) => setReminderDue(e.target.value)}
+                    className="rounded border border-slate-300 px-2 py-1.5 text-sm"
+                  />
+                </div>
+                <button
+                  disabled={reminderSubmitting || !reminderText.trim()}
+                  onClick={submitReminder}
+                  className="rounded bg-slate-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50"
+                >
+                  Додати
+                </button>
+              </div>
+            </Section>
+
+            <Section
+              title="Мої задачі про цього працівника"
+              right={
+                <label className="flex items-center gap-1.5 text-xs text-slate-500">
+                  <input type="checkbox" checked={reminderShowDone} onChange={(e) => setReminderShowDone(e.target.checked)} />
+                  показати виконані
+                </label>
+              }
+            >
+              <div className="divide-y divide-slate-100">
+                {(reminders ?? [])
+                  .filter((r) => reminderShowDone || !r.isDone)
+                  .map((r) => (
+                    <div key={r.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
+                      <input
+                        type="checkbox"
+                        checked={r.isDone}
+                        disabled={reminderBusyId === r.id}
+                        onChange={(e) => toggleReminder(r.id, e.target.checked)}
+                        className="h-4 w-4"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p className={`text-sm ${r.isDone ? "text-slate-400 line-through" : "text-slate-900"}`}>{r.text}</p>
+                        {r.dueAt && <p className="text-xs text-slate-500">термін: {new Date(r.dueAt).toLocaleDateString("uk-UA")}</p>}
+                      </div>
+                      <button
+                        disabled={reminderBusyId === r.id}
+                        onClick={() => removeReminder(r.id)}
+                        className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                      >
+                        Видалити
+                      </button>
+                    </div>
+                  ))}
+                {!(reminders ?? []).filter((r) => reminderShowDone || !r.isDone).length && (
+                  <p className="px-4 py-8 text-center text-sm text-slate-500">Задач ще немає.</p>
+                )}
               </div>
             </Section>
           </div>

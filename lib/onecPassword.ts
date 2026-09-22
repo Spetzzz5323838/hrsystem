@@ -4,7 +4,8 @@ import { encryptSecret, decryptSecret } from "./crypto";
 import { generateBarcodePng } from "./barcode";
 import { queueOnecPasswordDelivery } from "./notifications";
 import { sendTelegramPhoto } from "./telegram";
-import { completeTask } from "./onboarding";
+import { completeTask, getInstanceTasks } from "./onboarding";
+import { TaskStatus } from "../generated/prisma/client";
 
 /**
  * Пункт чек-ліста "Реєстрація в 1С, генерація пароля" (docs plan-v1.md
@@ -21,6 +22,15 @@ export async function setOnecPassword(
 
   const task = await prisma.task.findUnique({ where: { id: taskId }, include: { instance: true } });
   if (!task) return { ok: false, error: "Задачу не знайдено" };
+  if (task.status === TaskStatus.DONE) return { ok: false, error: "Уже виконано" };
+
+  // Той самий гейт, що на початку completeTask — ПЕРЕД записом пароля й
+  // постановкою джоби доставки штрихкода в чергу, а не лише всередині
+  // фінального completeTask(taskId, ...) у кінці функції (той самий клас
+  // бага, що виправлено 2026-09-22 в completeCuratorAssignmentTask).
+  const tasksInInstance = await getInstanceTasks(task.instanceId);
+  const thisView = tasksInInstance.find((t) => t.taskId === taskId);
+  if (thisView?.blocked) return { ok: false, error: "Заблоковано попереднім пунктом" };
 
   const employmentId = task.instance.employmentId;
 

@@ -3,48 +3,48 @@
 <head>
 <meta charset="utf-8" />
 <style>
-  @page { size: 54mm 86mm; margin: 0; }
+  @page { size: 86mm 54mm; margin: 0; }
   * { box-sizing: border-box; }
   body {
     font-family: "DejaVu Sans", Arial, sans-serif;
-    width: 54mm;
-    height: 86mm;
+    width: 86mm;
+    height: 54mm;
     margin: 0;
     padding: 4mm;
     display: flex;
     flex-direction: column;
-    align-items: center;
+    justify-content: space-between;
     border: 1.5mm solid #0f172a;
   }
-  .company { font-size: 8px; letter-spacing: 0.5px; text-transform: uppercase; color: #475569; margin-bottom: 3mm; }
-  .photo-box {
-    width: 30mm;
-    height: 36mm;
-    border: 1px solid #94a3b8;
-    background: #f1f5f9;
+  .company { font-size: 8px; letter-spacing: 0.5px; text-transform: uppercase; color: #475569; }
+  .info { text-align: center; }
+  .name { font-size: 15px; font-weight: bold; color: #0f172a; }
+  .position { margin-top: 1.5mm; font-size: 11px; color: #334155; }
+  .object { margin-top: 1mm; font-size: 9px; color: #64748b; }
+  .barcode-box {
+    width: 100%;
+    height: 14mm;
     display: flex;
     align-items: center;
     justify-content: center;
-    overflow: hidden;
   }
-  .photo-box img { width: 100%; height: 100%; object-fit: cover; }
-  .photo-placeholder { font-size: 8px; color: #94a3b8; text-align: center; padding: 2mm; }
-  .name { margin-top: 4mm; font-size: 13px; font-weight: bold; text-align: center; color: #0f172a; }
-  .position { margin-top: 1.5mm; font-size: 10px; text-align: center; color: #334155; }
-  .object { margin-top: auto; font-size: 9px; text-align: center; color: #64748b; padding-top: 3mm; }
+  .barcode-box img { height: 100%; max-width: 100%; object-fit: contain; }
+  .barcode-placeholder { font-size: 8px; color: #94a3b8; }
 </style>
 </head>
 <body>
   <div class="company">Коровай</div>
-  <div class="photo-box">
-    {{#if photoDataUri}}
-      <img src="{{photoDataUri}}" alt="" />
+  <div class="info">
+    <div class="name">{{fullName}}</div>
+    <div class="position">{{positionTitle}}</div>
+    <div class="object">{{objectName}}</div>
+  </div>
+  <div class="barcode-box">
+    {{#if barcodeDataUri}}
+      <img src="{{barcodeDataUri}}" alt="" />
     {{else}}
-      <div class="photo-placeholder">фото відсутнє</div>
+      <div class="barcode-placeholder">код 1С ще не видано</div>
     {{/if}}
   </div>
-  <div class="name">{{fullName}}</div>
-  <div class="position">{{positionTitle}}</div>
-  <div class="object">{{objectName}}</div>
 </body>
 </html>

@@ -3,6 +3,7 @@ import { hasAccess } from "./access";
 import { logAudit } from "./audit";
 import { sendNotification } from "./notificationTemplates";
 import { getCompetencyDelta } from "./competencies";
+import { isCuratorEligibleFor } from "./curator";
 import { hashPassword, generateCabinetPassword } from "./auth";
 import { checkProfileClosedBadge, checkBeyondProfileBadge, checkFastStartBadge, checkMentorBadge } from "./rating";
 import {
@@ -31,6 +32,39 @@ function addMonths(date: Date, months: number): Date {
  * ("Тест «Каса»" тощо) з самооцінюванням через бот навмисно не займали
  * тут, це окреме питання.
  */
+const MATERIALS_ACK_TASK_TITLE = "Ознайомлення з обов'язковими матеріалами";
+
+/**
+ * sendViaBot-матеріали посади (docs plan-v1.md §9.1) — спільна вибірка
+ * для автосилки welcomebook (пункт 11, AUTO) і для повідомлення з кнопкою
+ * підтвердження ознайомлення (пункт 13, MARK, нижче) — той самий перелік,
+ * щоб стажер бачив однаковий список в обох місцях.
+ */
+async function getSendableMaterials(positionProfileId: number) {
+  return prisma.material.findMany({
+    where: { sendViaBot: true, competency: { positionCompetencies: { some: { positionProfileId } } } },
+    orderBy: { id: "asc" },
+  });
+}
+
+/**
+ * Пункти з `responsibleRole: EMPLOYEE` (напр. "Згода на обробку
+ * персональних даних") призначаються самому працівнику — а він працює
+ * тільки через бот (архітектурне рішення №1). Без цього сповіщення з
+ * кнопкою пункт нікому й нема на чому виконати: у веб-адмінці кнопка
+ * "виконано" видима лише призначеному виконавцю, а кабінет `/me` показує
+ * чек-лист тільки на читання. Стосується лише MARK — TEST-пункти
+ * ("Тест «Каса»" тощо) з самооцінюванням через бот навмисно не займали
+ * тут, це окреме питання.
+ *
+ * Для САМЕ пункту "Ознайомлення з обов'язковими матеріалами" (правки
+ * 20.09.2026, п.9) — окрема гілка: раніше стажер отримував список
+ * матеріалів окремим інформаційним повідомленням БЕЗ кнопки (пункт 11,
+ * AUTO), а тоді, коли розблоковувався сам пункт 13, — загальний текст
+ * "Потрібна ваша дія: «Ознайомлення з обов'язковими матеріалами»" без
+ * самого списку. Тепер обидва об'єднано в одне повідомлення: список +
+ * кнопка одразу поруч, той самий callback employee_task_done.
+ */
 async function notifyEmployeeMarkTask(task: {
   id: number;
   assigneeId: number | null;
@@ -39,12 +73,26 @@ async function notifyEmployeeMarkTask(task: {
   if (task.itemTemplate.responsibleRole !== Role.EMPLOYEE || task.itemTemplate.actionType !== ActionType.MARK) return;
   if (!task.assigneeId) return;
 
-  const assignee = await prisma.employment.findUnique({ where: { id: task.assigneeId }, include: { person: true } });
+  const assignee = await prisma.employment.findUnique({ where: { id: task.assigneeId }, include: { person: true, staffUnit: true } });
   if (!assignee) return;
 
-  await sendNotification(assignee.personId, "onboarding.employeeMarkTaskReminder", { taskTitle: task.itemTemplate.title }, {
-    inline_keyboard: [[{ text: "Виконано", callback_data: `employee_task_done:${task.id}` }]],
-  });
+  const replyMarkup = { inline_keyboard: [[{ text: "Ознайомлений(а)", callback_data: `employee_task_done:${task.id}` }]] };
+
+  if (task.itemTemplate.title === MATERIALS_ACK_TASK_TITLE) {
+    const materials = await getSendableMaterials(assignee.staffUnit.positionProfileId);
+    if (materials.length) {
+      const lines = materials.map((m) => `• ${m.title}${m.url ? ` — ${m.url}` : ""}`);
+      await sendNotification(assignee.personId, "onboarding.materialsAcknowledgeRequest", { materialsList: lines.join("\n") }, replyMarkup);
+      return;
+    }
+  }
+
+  await sendNotification(
+    assignee.personId,
+    "onboarding.employeeMarkTaskReminder",
+    { taskTitle: task.itemTemplate.title },
+    { inline_keyboard: [[{ text: "Виконано", callback_data: `employee_task_done:${task.id}` }]] },
+  );
 }
 
 /**
@@ -105,13 +153,7 @@ export async function resolveAssignee(role: Role, targetOrgNodePath: string): Pr
  * telegramId (окрема команда /link) або матеріалів немає.
  */
 async function sendOnboardingMaterials(employment: { personId: number; staffUnit: { positionProfileId: number } }): Promise<void> {
-  const materials = await prisma.material.findMany({
-    where: {
-      sendViaBot: true,
-      competency: { positionCompetencies: { some: { positionProfileId: employment.staffUnit.positionProfileId } } },
-    },
-    orderBy: { id: "asc" },
-  });
+  const materials = await getSendableMaterials(employment.staffUnit.positionProfileId);
   if (!materials.length) return;
 
   const lines = materials.map((m) => `• ${m.title}${m.url ? ` — ${m.url}` : ""}`);
@@ -192,11 +234,14 @@ export async function startOnboarding(employmentId: number): Promise<{ instanceI
  * показує ті самі MARK-пункти, призначені особисто працівнику, без
  * очікування на нове сповіщення.
  */
-export async function getMyPendingEmployeeMarkTasks(personId: number): Promise<{ taskId: number; title: string }[]> {
-  const employmentIds = (
-    await prisma.employment.findMany({ where: { personId, status: { not: EmploymentStatus.TERMINATED } }, select: { id: true } })
-  ).map((e) => e.id);
+export async function getMyPendingEmployeeMarkTasks(personId: number): Promise<{ taskId: number; title: string; materialsList: string | null }[]> {
+  const employments = await prisma.employment.findMany({
+    where: { personId, status: { not: EmploymentStatus.TERMINATED } },
+    select: { id: true, staffUnit: { select: { positionProfileId: true } } },
+  });
+  const employmentIds = employments.map((e) => e.id);
   if (!employmentIds.length) return [];
+  const positionByEmploymentId = new Map(employments.map((e) => [e.id, e.staffUnit.positionProfileId]));
 
   const tasks = await prisma.task.findMany({
     where: {
@@ -208,7 +253,7 @@ export async function getMyPendingEmployeeMarkTasks(personId: number): Promise<{
   });
 
   const viewsByInstance = new Map<number, TaskView[]>();
-  const result: { taskId: number; title: string }[] = [];
+  const result: { taskId: number; title: string; materialsList: string | null }[] = [];
   for (const t of tasks) {
     let views = viewsByInstance.get(t.instanceId);
     if (!views) {
@@ -216,7 +261,18 @@ export async function getMyPendingEmployeeMarkTasks(personId: number): Promise<{
       viewsByInstance.set(t.instanceId, views);
     }
     const view = views.find((v) => v.taskId === t.id);
-    if (view && !view.blocked) result.push({ taskId: t.id, title: t.itemTemplate.title });
+    if (!view || view.blocked) continue;
+
+    let materialsList: string | null = null;
+    if (t.itemTemplate.title === MATERIALS_ACK_TASK_TITLE && t.assigneeId) {
+      const positionProfileId = positionByEmploymentId.get(t.assigneeId);
+      if (positionProfileId != null) {
+        const materials = await getSendableMaterials(positionProfileId);
+        if (materials.length) materialsList = materials.map((m) => `• ${m.title}${m.url ? ` — ${m.url}` : ""}`).join("\n");
+      }
+    }
+
+    result.push({ taskId: t.id, title: t.itemTemplate.title, materialsList });
   }
   return result;
 }
@@ -578,6 +634,18 @@ export async function completeCuratorAssignmentTask(
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const task = await prisma.task.findUnique({ where: { id: taskId }, include: { instance: true } });
   if (!task) return { ok: false, error: "Задачу не знайдено" };
+  if (task.status === TaskStatus.DONE) return { ok: false, error: "Уже виконано" };
+
+  // Той самий гейт, що на початку completeTask — навмисно ПЕРЕД усіма
+  // побічними діями нижче (запис куратора, сповіщення, аудит-лог), а не
+  // лише всередині фінального completeTask(taskId, ...) у кінці функції.
+  // Раніше перевірка була тільки там — і функція встигала записати
+  // curatorId та надіслати сповіщення ще ДО того, як з'ясовувалось, що
+  // пункт узагалі заблокований (виправлено 2026-09-22, знайдено під час
+  // тестування нової моделі "Кураторство").
+  const tasksInInstance = await getInstanceTasks(task.instanceId);
+  const thisView = tasksInInstance.find((t) => t.taskId === taskId);
+  if (thisView?.blocked) return { ok: false, error: "Заблоковано попереднім пунктом" };
 
   const curator = await prisma.employment.findUnique({
     where: { id: curatorEmploymentId },
@@ -586,8 +654,18 @@ export async function completeCuratorAssignmentTask(
   if (!curator || curator.status === EmploymentStatus.TERMINATED) {
     return { ok: false, error: "Куратора не знайдено" };
   }
-  if (!curator.staffUnit.positionProfile.canBeCurator) {
-    return { ok: false, error: "Ця людина не може бути куратором за профілем посади" };
+
+  const traineeBefore = await prisma.employment.findUnique({
+    where: { id: task.instance.employmentId },
+    include: { staffUnit: true },
+  });
+  if (!traineeBefore) return { ok: false, error: "Стажера не знайдено" };
+
+  // Кураторство "з людини" (правки 20.09.2026, п.9) — точніша перевірка
+  // за компетенціями замість голого прапорця посади, lib/curator.ts.
+  const eligible = await isCuratorEligibleFor(curatorEmploymentId, traineeBefore.staffUnit.positionProfileId);
+  if (!eligible) {
+    return { ok: false, error: "Ця людина не може бути куратором для цієї посади" };
   }
 
   const trainee = await prisma.employment.update({
@@ -600,6 +678,10 @@ export async function completeCuratorAssignmentTask(
     fullName: trainee.person.fullName,
     positionTitle: trainee.staffUnit.positionProfile.title,
   });
+
+  // Раніше сповіщався ЛИШЕ куратор — стажер не дізнавався, хто його
+  // куратор, ніяким каналом (правки 20.09.2026, п.9).
+  await sendNotification(trainee.personId, "onboarding.traineeNotifiedOfCurator", { curatorName: curator.person.fullName });
 
   await logAudit({
     actorId: completedByEmploymentId,
@@ -620,4 +702,71 @@ export async function completeCuratorAssignmentTask(
   });
 
   return completeTask(taskId, completedByEmploymentId);
+}
+
+const PRE_ACTIVE_STATUSES: EmploymentStatus[] = [
+  EmploymentStatus.REGISTERED,
+  EmploymentStatus.ACTIVATED,
+  EmploymentStatus.DOCUMENTS_PENDING,
+  EmploymentStatus.TRAINEE,
+  EmploymentStatus.READY_FOR_ATTESTATION,
+];
+
+/**
+ * Пункт "Заповнення профілю: посада, відділ, дата виходу" (правки
+ * 20.09.2026, п.9) — раніше просто позначався виконаним без жодної форми.
+ * Тепер реально записує посаду/відділ (staffUnitId), дату виходу (hiredAt)
+ * і дату народження — і при першому заповненні заразом закриває сам пункт
+ * чек-листа. Доступно ТІЛЬКИ поки працівник ще не ACTIVE (узгоджено з
+ * користувачем 2026-09-22) — для вже активних зміна посади йде тільки
+ * через процес "Переведення" (архітектурне рішення №3), сюди він не лізе.
+ */
+export async function updateProfileFields(
+  employmentId: number,
+  patch: { staffUnitId?: number; hiredAt?: Date; birthDate?: Date | null },
+  actorEmploymentId: number,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const employment = await prisma.employment.findUnique({ where: { id: employmentId } });
+  if (!employment) return { ok: false, error: "Працівника не знайдено" };
+
+  if (!PRE_ACTIVE_STATUSES.includes(employment.status)) {
+    return { ok: false, error: "Редагування можливе лише поки працівник не активний — після активації користуйтесь переведенням" };
+  }
+
+  if (patch.staffUnitId != null) {
+    const staffUnit = await prisma.staffUnit.findUnique({ where: { id: patch.staffUnitId } });
+    if (!staffUnit) return { ok: false, error: "Штатну одиницю не знайдено" };
+  }
+
+  await prisma.employment.update({
+    where: { id: employmentId },
+    data: { staffUnitId: patch.staffUnitId, hiredAt: patch.hiredAt },
+  });
+  if (patch.birthDate !== undefined) {
+    await prisma.person.update({ where: { id: employment.personId }, data: { birthDate: patch.birthDate } });
+  }
+
+  await logAudit({
+    actorId: actorEmploymentId,
+    action: "employee.profileFieldsUpdated",
+    entityType: "Employment",
+    entityId: employmentId,
+    diff: { staffUnitId: patch.staffUnitId, hiredAt: patch.hiredAt, birthDate: patch.birthDate },
+  });
+
+  // Перше заповнення — одразу закриваємо сам пункт чек-листа, якщо він ще
+  // PENDING і не заблокований (наступні виправлення після цього моменту
+  // пункт уже DONE, повторно не займаємо).
+  const instance = await prisma.processInstance.findFirst({
+    where: { employmentId, state: ProcessState.RUNNING, template: { type: ProcessType.ONBOARDING } },
+  });
+  if (instance) {
+    const views = await getInstanceTasks(instance.id);
+    const task = views.find((v) => v.title === "Заповнення профілю: посада, відділ, дата виходу");
+    if (task && task.status === TaskStatus.PENDING && !task.blocked) {
+      await completeTask(task.taskId, actorEmploymentId);
+    }
+  }
+
+  return { ok: true };
 }

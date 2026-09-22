@@ -195,6 +195,7 @@ export async function decideVacationRequest(
   decision: "APPROVED" | "REJECTED",
   decidedByEmploymentId: number,
   rejectReason: string | null,
+  newDates?: { fromDate: Date; toDate: Date },
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const request = await prisma.vacationRequest.findUnique({
     where: { id: requestId },
@@ -203,6 +204,11 @@ export async function decideVacationRequest(
   if (!request) return { ok: false, error: "Заявку не знайдено" };
   if (request.status !== VacationStatus.PENDING) return { ok: false, error: "Заявку вже вирішено" };
 
+  // Погоджувач може за потреби запропонувати інші дати замість бажаних
+  // (правки 20.09.2026, п.11) — лише при погодженні, відхилення дат не чіпає.
+  const datesChanged =
+    decision === "APPROVED" && newDates && (newDates.fromDate.getTime() !== request.fromDate.getTime() || newDates.toDate.getTime() !== request.toDate.getTime());
+
   await prisma.vacationRequest.update({
     where: { id: requestId },
     data: {
@@ -210,6 +216,7 @@ export async function decideVacationRequest(
       decidedById: decidedByEmploymentId,
       decidedAt: new Date(),
       rejectReason: decision === "REJECTED" ? rejectReason : null,
+      ...(datesChanged ? { fromDate: newDates!.fromDate, toDate: newDates!.toDate } : {}),
     },
   });
 
@@ -218,12 +225,15 @@ export async function decideVacationRequest(
     action: decision === "APPROVED" ? "vacation.approved" : "vacation.rejected",
     entityType: "VacationRequest",
     entityId: requestId,
-    diff: { rejectReason },
+    diff: { rejectReason, ...(datesChanged ? { datesChangedByApprover: true, newDates } : {}) },
   });
 
   // docs v1.2 §4.1: "працівник отримує підтвердження в Telegram" — незалежно
-  // від того, чи рішення прийняте в боті, чи у вебі.
-  const period = `${fmtDate(request.fromDate)} — ${fmtDate(request.toDate)}`;
+  // від того, чи рішення прийняте в боті, чи у вебі. Якщо погоджувач змінив
+  // дати — у сповіщенні йде вже НОВИЙ період, не бажаний працівником.
+  const period = datesChanged
+    ? `${fmtDate(newDates!.fromDate)} — ${fmtDate(newDates!.toDate)} (дати змінено погоджувачем)`
+    : `${fmtDate(request.fromDate)} — ${fmtDate(request.toDate)}`;
   if (decision === "APPROVED") {
     await sendNotification(request.employment.personId, "vacation.approved", { period });
   } else {

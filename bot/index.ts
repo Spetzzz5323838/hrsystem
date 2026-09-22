@@ -2,13 +2,14 @@ import { Bot, Keyboard } from "grammy";
 import { prisma } from "../lib/prisma";
 import { resolveAssignee, confirmReadyForAttestation, completeTask, getMyPendingEmployeeMarkTasks } from "../lib/onboarding";
 import { registerTelegramMessageWorker } from "../lib/notifications";
-import { sendNotification } from "../lib/notificationTemplates";
+import { sendNotification, sendNotificationNow } from "../lib/notificationTemplates";
 import { getBoss } from "../lib/queue";
 import { checkSlaEscalations } from "../lib/sla";
 import { runPeriodicBadgeChecks } from "../lib/badges-periodic";
 import { cleanupExpiredDocuments } from "../lib/document-retention";
+import { checkDueReminders } from "../lib/reminders";
 import { acknowledgeReview } from "../lib/review";
-import { approveLoginChallenge } from "../lib/auth";
+import { approveLoginChallenge, resetCabinetPassword } from "../lib/auth";
 import { checkVacationConflicts, createVacationRequest, type ConflictCheck } from "../lib/vacation";
 import { deliverOnecPassword } from "../lib/onecPassword";
 import { ONEC_PASSWORD_DELIVERY_QUEUE } from "../lib/notifications";
@@ -114,7 +115,8 @@ bot.command("start", async (ctx) => {
       "Вітаю! Це бот системи управління персоналом мережі «Коровай». Щоб зареєструватись, відскануйте QR-код на вашому об'єкті.\n\n" +
         "Якщо ви вже працюєте в компанії й хочете отримувати сповіщення сюди — напишіть /link.\n" +
         "Щоб подати заявку на відпустку — напишіть /vacation.\n" +
-        "Щоб побачити задачі, що очікують вашої дії — напишіть /tasks.",
+        "Щоб побачити задачі, що очікують вашої дії — напишіть /tasks.\n" +
+        "Щоб скинути пароль кабінету — напишіть /password.",
     );
     return;
   }
@@ -179,8 +181,12 @@ bot.command("tasks", async (ctx) => {
   }
 
   for (const t of tasks) {
-    await ctx.reply(`Потрібна ваша дія: «${t.title}».`, {
-      reply_markup: { inline_keyboard: [[{ text: "Виконано", callback_data: `employee_task_done:${t.taskId}` }]] },
+    const text = t.materialsList
+      ? `Матеріали для ознайомлення:\n\n${t.materialsList}\n\nПісля вивчення натисніть «Ознайомлений(а)».`
+      : `Потрібна ваша дія: «${t.title}».`;
+    const buttonText = t.materialsList ? "Ознайомлений(а)" : "Виконано";
+    await ctx.reply(text, {
+      reply_markup: { inline_keyboard: [[{ text: buttonText, callback_data: `employee_task_done:${t.taskId}` }]] },
     });
   }
 });
@@ -202,6 +208,26 @@ bot.command("vacation", async (ctx) => {
 
   vacationSessions.set(ctx.from.id, { step: "type", employmentId: employment.id });
   await ctx.reply("Яка відпустка?\n\n1 — Щорічна\n2 — За свій рахунок\n\nВведіть 1 або 2.");
+});
+
+// ── Самообслуговування паролем кабінету (правки 20.09.2026, п.1) — поруч
+// із ручним скидом адміністратором через веб (той самий lib/auth.ts::resetCabinetPassword).
+bot.command("password", async (ctx) => {
+  if (!ctx.from) return;
+
+  const person = await prisma.person.findUnique({ where: { telegramId: BigInt(ctx.from.id) } });
+  if (!person) {
+    await ctx.reply("Спершу прив'яжіть Telegram до вашого акаунта — напишіть /link.");
+    return;
+  }
+  if (!person.passwordHash) {
+    await ctx.reply("У вас ще немає пароля кабінету — він з'явиться після активації профілю.");
+    return;
+  }
+
+  await ctx.reply("Скинути пароль кабінету? Старий одразу стане недійсним.", {
+    reply_markup: { inline_keyboard: [[{ text: "Так, скинути", callback_data: `password_reset_confirm:${person.id}` }]] },
+  });
 });
 
 bot.on("message:text", async (ctx) => {
@@ -485,6 +511,20 @@ bot.callbackQuery(/^login_confirm:(\d+)$/, async (ctx) => {
   await ctx.reply("Вхід підтверджено. Можете повернутись у браузер.");
 });
 
+bot.callbackQuery(/^password_reset_confirm:(\d+)$/, async (ctx) => {
+  const personId = Number(ctx.match[1]);
+  const person = await prisma.person.findUnique({ where: { id: personId } });
+  if (!person || person.telegramId !== BigInt(ctx.from.id)) {
+    await ctx.answerCallbackQuery({ text: "Це не ваш запит", show_alert: true });
+    return;
+  }
+
+  const password = await resetCabinetPassword(personId, null);
+  await ctx.answerCallbackQuery({ text: "Пароль скинуто" });
+  await ctx.editMessageReplyMarkup(undefined).catch(() => {});
+  await sendNotificationNow(personId, "auth.cabinetPasswordReset", { password });
+});
+
 // ── Пункти чек-ліста з responsibleRole=EMPLOYEE (docs plan-v1.md §6.1,
 // напр. "Згода на обробку персональних даних") — виконує сам працівник,
 // кнопка приходить push-сповіщенням (lib/onboarding.ts::notifyEmployeeMarkTask)
@@ -519,6 +559,7 @@ bot.catch((err) => {
 const SLA_CHECK_QUEUE = "sla-escalation-check";
 const BADGE_CHECK_QUEUE = "periodic-badge-check";
 const DOCUMENT_RETENTION_QUEUE = "document-retention-cleanup";
+const REMINDER_DUE_QUEUE = "reminder-due-check";
 
 /**
  * Черга й планувальник живуть у процесі бота (не окремим третім
@@ -551,6 +592,10 @@ async function setupQueue() {
     if (deletedCount > 0) console.log(`Автоочищення сканів: видалено ${deletedCount}.`);
   });
   await boss.schedule(DOCUMENT_RETENTION_QUEUE, "0 4 * * *"); // раз на добу о 4:00
+
+  await boss.createQueue(REMINDER_DUE_QUEUE);
+  await boss.work(REMINDER_DUE_QUEUE, () => checkDueReminders());
+  await boss.schedule(REMINDER_DUE_QUEUE, "0 * * * *"); // щогодини, той самий цикл, що й SLA
 
   console.log("Черга й заплановані перевірки піднято.");
 }

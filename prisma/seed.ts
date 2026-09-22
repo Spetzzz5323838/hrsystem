@@ -388,6 +388,8 @@ const ACCESS_PROFILES: AccessProfileSeed[] = [
       Capability.MANAGE_MATERIALS,
       Capability.MANAGE_PERMISSIONS,
       Capability.VIEW_AUDIT_LOG,
+      Capability.RESET_CABINET_PASSWORD,
+      Capability.FORCE_COMPLETE_TASK,
     ],
   },
   { name: "Повний доступ", capabilities: Object.values(Capability) },
@@ -722,13 +724,17 @@ const baseChecklistItems: ChecklistItemSeed[] = [
   { order: 5, title: "Реєстрація в 1С, генерація пароля", responsibleRole: Role.ONEC_ADMIN, actionType: ActionType.INPUT_VALUE, isBlocking: true, slaHours: 24, module: null },
   { order: 6, title: "Прийом і сканування документів", responsibleRole: Role.ACCOUNTANT, actionType: ActionType.UPLOAD, isBlocking: true, slaHours: 72, module: null },
   { order: 7, title: "Оформлення прийому (заява, наказ)", responsibleRole: Role.ACCOUNTANT, actionType: ActionType.MARK, isBlocking: true, slaHours: 72, module: null },
-  { order: 8, title: "Вступний інструктаж з охорони праці", responsibleRole: Role.STORE_ADMIN, actionType: ActionType.MARK, isBlocking: true, slaHours: 24, module: null },
-  { order: 9, title: "Інструктаж з пожежної безпеки", responsibleRole: Role.STORE_ADMIN, actionType: ActionType.MARK, isBlocking: true, slaHours: 24, module: null },
-  { order: 10, title: "Видача бейджа, спецодягу, ключів", responsibleRole: Role.STORE_ADMIN, actionType: ActionType.MARK, isBlocking: false, slaHours: 72, module: null },
-  { order: 11, title: "Надсилання welcomebook і матеріалів LMS", responsibleRole: null, actionType: ActionType.AUTO, isBlocking: true, slaHours: 0, module: null },
-  { order: 12, title: "Знайомство з колективом і робочим місцем", responsibleRole: Role.STORE_ADMIN, actionType: ActionType.MARK, isBlocking: false, slaHours: 48, module: null },
-  { order: 13, title: "Ознайомлення з обов'язковими матеріалами", responsibleRole: Role.EMPLOYEE, actionType: ActionType.MARK, isBlocking: true, slaHours: 168, module: null },
-  { order: 14, title: "Стажування під наглядом куратора", responsibleRole: Role.CURATOR, actionType: ActionType.MARK, isBlocking: true, slaHours: 336, module: null },
+  // order 8, не серед модульних (правки 20.09.2026, п.9): виконує бухгалтер
+  // одразу після оформлення прийому, поки людина ще в кабінеті — умовний
+  // (module: MVO), як і решта модульних, просто не в діапазоні 100+.
+  { order: 8, title: "Договір про матвідповідальність", responsibleRole: Role.ACCOUNTANT, actionType: ActionType.MARK, isBlocking: true, slaHours: 72, module: ChecklistModule.MVO },
+  { order: 9, title: "Вступний інструктаж з охорони праці", responsibleRole: Role.STORE_ADMIN, actionType: ActionType.MARK, isBlocking: true, slaHours: 24, module: null },
+  { order: 10, title: "Інструктаж з пожежної безпеки", responsibleRole: Role.STORE_ADMIN, actionType: ActionType.MARK, isBlocking: true, slaHours: 24, module: null },
+  { order: 11, title: "Видача бейджа, спецодягу, ключів", responsibleRole: Role.STORE_ADMIN, actionType: ActionType.MARK, isBlocking: false, slaHours: 72, module: null },
+  { order: 12, title: "Надсилання welcomebook і матеріалів LMS", responsibleRole: null, actionType: ActionType.AUTO, isBlocking: true, slaHours: 0, module: null },
+  { order: 13, title: "Знайомство з колективом і робочим місцем", responsibleRole: Role.STORE_ADMIN, actionType: ActionType.MARK, isBlocking: false, slaHours: 48, module: null },
+  { order: 14, title: "Ознайомлення з обов'язковими матеріалами", responsibleRole: Role.EMPLOYEE, actionType: ActionType.MARK, isBlocking: true, slaHours: 168, module: null },
+  { order: 15, title: "Стажування під наглядом куратора", responsibleRole: Role.CURATOR, actionType: ActionType.MARK, isBlocking: true, slaHours: 336, module: null },
   // order 200, не 15: модульні пункти (order 100-182 нижче) мають бути пройдені
   // ДО фінальної атестації, а не навпаки — послідовне блокування рахує єдиний
   // ланцюжок по order через усі пункти інстансу, тож атестація має йти
@@ -742,7 +748,6 @@ const moduleChecklistItems: ChecklistItemSeed[] = [
   { order: 102, title: "Інструктаж з інкасації", responsibleRole: Role.STORE_ADMIN, actionType: ActionType.MARK, isBlocking: true, slaHours: 24, module: ChecklistModule.CASHIER },
   { order: 103, title: "Тест «Каса»", responsibleRole: Role.EMPLOYEE, actionType: ActionType.TEST, isBlocking: true, slaHours: 168, module: ChecklistModule.CASHIER, competencyCode: "CASHIER_PRRO" },
 
-  { order: 110, title: "Договір про матвідповідальність", responsibleRole: Role.ACCOUNTANT, actionType: ActionType.MARK, isBlocking: true, slaHours: 72, module: ChecklistModule.MVO },
   { order: 111, title: "Прийом-передача ТМЦ", responsibleRole: Role.STORE_ADMIN, actionType: ActionType.MARK, isBlocking: true, slaHours: 72, module: ChecklistModule.MVO },
   { order: 112, title: "Ознайомлення з порядком інвентаризації", responsibleRole: Role.STORE_ADMIN, actionType: ActionType.MARK, isBlocking: false, slaHours: 72, module: ChecklistModule.MVO },
 
@@ -1299,9 +1304,19 @@ const notificationTemplates: { key: string; description: string; text: string }[
     text: "{{fullName}} готовий(-а) до атестації.",
   },
   {
+    key: "onboarding.materialsAcknowledgeRequest",
+    description: "Стажеру — список обов'язкових матеріалів + кнопка підтвердження ознайомлення",
+    text: "Матеріали для ознайомлення:\n\n{{materialsList}}\n\nПісля вивчення натисніть «Ознайомлений(а)».",
+  },
+  {
     key: "onboarding.curatorAssigned",
     description: "Куратору — призначено нового підопічного",
     text: "У вас новий підопічний: {{fullName}} ({{positionTitle}}). Чек-ліст онбордингу — в системі.",
+  },
+  {
+    key: "onboarding.traineeNotifiedOfCurator",
+    description: "Стажеру — призначено куратора",
+    text: "Ваш куратор на час навчання: {{curatorName}}. З усіх питань по стажуванню звертайтесь до нього/неї.",
   },
   {
     key: "sla.overdueReminder",
@@ -1352,6 +1367,16 @@ const notificationTemplates: { key: string; description: string; text: string }[
     key: "auth.loginConfirmation",
     description: "Підтвердження входу через 2FA (кнопка)",
     text: "Вхід у систему для {{fullName}}. Якщо це ви — підтвердіть кнопкою нижче.",
+  },
+  {
+    key: "auth.cabinetPasswordReset",
+    description: "Новий пароль кабінету після скидання (боту або адміном)",
+    text: "Ваш новий пароль до кабінету: {{password}}. Попередній більше не діє. Якщо це були не ви — негайно повідомте адміністратора.",
+  },
+  {
+    key: "reminder.due",
+    description: "Автору особистого нагадування — настав термін",
+    text: "Нагадування про {{fullName}}: «{{text}}».",
   },
 ];
 

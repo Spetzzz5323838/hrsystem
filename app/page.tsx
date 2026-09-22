@@ -24,6 +24,17 @@ type ExpiringCompetency = {
   validUntil: string;
 };
 
+type ReminderRow = {
+  id: number;
+  employmentId: number;
+  fullName: string;
+  positionTitle: string;
+  objectName: string;
+  text: string;
+  dueAt: string | null;
+  isDone: boolean;
+};
+
 function fmt(iso: string): string {
   return new Date(iso).toLocaleDateString("uk-UA", { day: "2-digit", month: "2-digit", year: "numeric" });
 }
@@ -38,12 +49,50 @@ function Avatar({ name }: { name: string }) {
   );
 }
 
+type GroupMode = "none" | "employee" | "due";
+
+const DUE_BUCKET_ORDER = ["Протерміновано", "До 3 днів", "До тижня", "Пізніше", "Без терміну"];
+
+function dueBucket(t: MyTask): string {
+  if (t.overdue) return "Протерміновано";
+  if (!t.dueAt) return "Без терміну";
+  const days = (new Date(t.dueAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24);
+  if (days <= 3) return "До 3 днів";
+  if (days <= 7) return "До тижня";
+  return "Пізніше";
+}
+
+function groupTasks(tasks: MyTask[], mode: GroupMode): [string, MyTask[]][] {
+  if (mode === "none") return [["", tasks]];
+  const by = mode === "employee" ? (t: MyTask) => t.fullName : dueBucket;
+  const groups = new Map<string, MyTask[]>();
+  for (const t of tasks) {
+    const key = by(t);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(t);
+  }
+  const keys = mode === "due" ? DUE_BUCKET_ORDER.filter((k) => groups.has(k)) : [...groups.keys()].sort((a, b) => a.localeCompare(b, "uk"));
+  return keys.map((k) => [k, groups.get(k)!]);
+}
+
 export default function HomePage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [myTasks, setMyTasks] = useState<MyTask[]>([]);
   const [expiring, setExpiring] = useState<ExpiringCompetency[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [groupMode, setGroupMode] = useState<GroupMode>("none");
+  const [reminders, setReminders] = useState<ReminderRow[]>([]);
+  const [reminderFilterDone, setReminderFilterDone] = useState(false);
+  const [reminderFilterQuery, setReminderFilterQuery] = useState("");
+  const [reminderBusyId, setReminderBusyId] = useState<number | null>(null);
+
+  const loadReminders = (done: boolean) => {
+    fetch(`/api/reminders?done=${done}`)
+      .then((r) => r.json())
+      .then((data) => setReminders(data))
+      .catch(() => {});
+  };
 
   useEffect(() => {
     fetch("/api/me")
@@ -63,6 +112,7 @@ export default function HomePage() {
           router.push("/me");
           return;
         }
+        loadReminders(false);
         return fetch("/api/me/tasks")
           .then((r2) => r2.json())
           .then((data) => {
@@ -72,7 +122,26 @@ export default function HomePage() {
       })
       .catch(() => setError("Не вдалося завантажити задачі"))
       .finally(() => setLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router]);
+
+  useEffect(() => {
+    if (!loading) loadReminders(reminderFilterDone);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reminderFilterDone]);
+
+  const toggleReminder = (id: number, isDone: boolean) => {
+    setReminderBusyId(id);
+    fetch(`/api/reminders/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ isDone }),
+    })
+      .then(() => loadReminders(reminderFilterDone))
+      .finally(() => setReminderBusyId(null));
+  };
+
+  const visibleReminders = reminders.filter((r) => r.fullName.toLowerCase().includes(reminderFilterQuery.trim().toLowerCase()));
 
   if (loading) {
     return (
@@ -92,7 +161,23 @@ export default function HomePage() {
   return (
     <AppShell active="/">
       <div className="space-y-4">
-        <h2 className="text-xl font-semibold text-slate-900">Мої задачі</h2>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-xl font-semibold text-slate-900">Мої задачі</h2>
+          {myTasks.length > 0 && (
+            <label className="flex items-center gap-2 text-sm text-slate-600">
+              Групувати:
+              <select
+                value={groupMode}
+                onChange={(e) => setGroupMode(e.target.value as GroupMode)}
+                className="rounded border border-slate-300 bg-white px-2 py-1 text-sm"
+              >
+                <option value="none">Не групувати</option>
+                <option value="employee">За працівником</option>
+                <option value="due">За терміном</option>
+              </select>
+            </label>
+          )}
+        </div>
 
         {myTasks.length === 0 && expiring.length === 0 && (
           <div className="rounded-md border border-dashed border-slate-300 bg-white px-6 py-12 text-center">
@@ -100,28 +185,36 @@ export default function HomePage() {
           </div>
         )}
 
-        {myTasks.length > 0 && (
-          <div className="divide-y divide-slate-100 rounded-md border border-slate-200 bg-white">
-            {myTasks.map((t) => (
-              <button
-                key={t.taskId}
-                onClick={() => router.push(`/employees/${t.employmentId}?tab=${t.tab}`)}
-                className="flex w-full items-center gap-4 px-4 py-3 text-left hover:bg-slate-50"
-              >
-                <span className={`h-8 w-1 rounded ${t.overdue ? "bg-rose-500" : "bg-amber-500"}`} />
-                <Avatar name={t.fullName} />
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium text-slate-900">{t.title}</p>
-                  <p className="text-xs text-slate-500">
-                    {t.fullName} · {t.positionTitle} · {t.objectName}
-                    {t.dueAt && <span className={t.overdue ? "text-rose-600" : ""}> · до {fmt(t.dueAt)}</span>}
-                  </p>
+        {myTasks.length > 0 &&
+          groupTasks(myTasks, groupMode).map(([group, tasks]) => (
+            <div key={group || "flat"} className="rounded-md border border-slate-200 bg-white">
+              {group && (
+                <div className="border-b border-slate-100 bg-slate-50 px-4 py-1.5 text-xs font-medium text-slate-500">
+                  {group} <span className="font-normal">({tasks.length})</span>
                 </div>
-                <ChevronRight size={16} className="text-slate-400" />
-              </button>
-            ))}
-          </div>
-        )}
+              )}
+              <div className="divide-y divide-slate-100">
+                {tasks.map((t) => (
+                  <button
+                    key={t.taskId}
+                    onClick={() => router.push(`/employees/${t.employmentId}?tab=${t.tab}`)}
+                    className="flex w-full items-center gap-4 px-4 py-3 text-left hover:bg-slate-50"
+                  >
+                    <span className={`h-8 w-1 rounded ${t.overdue ? "bg-rose-500" : "bg-amber-500"}`} />
+                    <Avatar name={t.fullName} />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-slate-900">{t.title}</p>
+                      <p className="text-xs text-slate-500">
+                        {t.fullName} · {t.positionTitle} · {t.objectName}
+                        {t.dueAt && <span className={t.overdue ? "text-rose-600" : ""}> · до {fmt(t.dueAt)}</span>}
+                      </p>
+                    </div>
+                    <ChevronRight size={16} className="text-slate-400" />
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
 
         {expiring.length > 0 && (
           <div className="rounded-md border border-slate-200 bg-white">
@@ -140,6 +233,46 @@ export default function HomePage() {
             </div>
           </div>
         )}
+
+        <div className="rounded-md border border-slate-200 bg-white">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-4 py-2">
+            <span className="text-sm font-medium text-slate-700">Мої нагадування</span>
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                type="text"
+                value={reminderFilterQuery}
+                onChange={(e) => setReminderFilterQuery(e.target.value)}
+                placeholder="Пошук за працівником…"
+                className="rounded border border-slate-300 px-2 py-1 text-xs"
+              />
+              <label className="flex items-center gap-1.5 text-xs text-slate-500">
+                <input type="checkbox" checked={reminderFilterDone} onChange={(e) => setReminderFilterDone(e.target.checked)} />
+                показати виконані
+              </label>
+            </div>
+          </div>
+          <div className="divide-y divide-slate-100">
+            {visibleReminders.map((r) => (
+              <div key={r.id} className="flex flex-wrap items-center gap-3 px-4 py-2.5">
+                <input
+                  type="checkbox"
+                  checked={r.isDone}
+                  disabled={reminderBusyId === r.id}
+                  onChange={(e) => toggleReminder(r.id, e.target.checked)}
+                  className="h-4 w-4"
+                />
+                <button
+                  onClick={() => router.push(`/employees/${r.employmentId}?tab=reminders`)}
+                  className={`min-w-0 flex-1 text-left text-sm hover:underline ${r.isDone ? "text-slate-400 line-through" : "text-slate-800"}`}
+                >
+                  {r.text} <span className="text-slate-400">— {r.fullName}</span>
+                </button>
+                {r.dueAt && <span className="tabular-nums text-xs text-slate-500">до {fmt(r.dueAt)}</span>}
+              </div>
+            ))}
+            {!visibleReminders.length && <p className="px-4 py-6 text-center text-sm text-slate-500">Нагадувань немає.</p>}
+          </div>
+        </div>
       </div>
     </AppShell>
   );

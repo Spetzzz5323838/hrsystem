@@ -1,7 +1,17 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { HelpCircle } from "lucide-react";
 import AppShell from "../components/AppShell";
+
+/** Коротка текстова підказка (правки 20.09.2026, п.2) — нативний title, ховер мишею. */
+function Hint({ text }: { text: string }) {
+  return (
+    <span title={text} className="inline-flex cursor-help align-text-top text-slate-400 hover:text-slate-600">
+      <HelpCircle size={13} />
+    </span>
+  );
+}
 
 type ProfileListItem = {
   id: number;
@@ -15,6 +25,8 @@ type ProfileListItem = {
 };
 
 type ProfileDetail = ProfileListItem & {
+  moduleFlags: string[];
+  isActive: boolean;
   competencies: {
     id: number;
     name: string;
@@ -60,7 +72,7 @@ const REVIEW_CRITERION_LABELS: Record<string, string> = {
   INITIATIVE: "Ініціатива й розвиток",
 };
 
-function Section({ title, right, children }: { title: string; right?: React.ReactNode; children: React.ReactNode }) {
+function Section({ title, right, children }: { title: React.ReactNode; right?: React.ReactNode; children: React.ReactNode }) {
   return (
     <div className="border border-slate-200 bg-white rounded-md">
       <div className="flex items-center justify-between border-b border-slate-200 px-4 py-2.5">
@@ -131,6 +143,56 @@ export default function CatalogPage() {
       })
       .then(setDetail)
       .catch((e) => setError(e.message));
+  };
+
+  const [newPosTitle, setNewPosTitle] = useState("");
+  const [newPosLevel, setNewPosLevel] = useState("10");
+  const [posCreating, setPosCreating] = useState(false);
+  const [posError, setPosError] = useState<string | null>(null);
+
+  const createPosition = () => {
+    if (!newPosTitle.trim()) return;
+    setPosCreating(true);
+    setPosError(null);
+    fetch("/api/position-profiles", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: newPosTitle.trim(), level: Number(newPosLevel) || 0 }),
+    })
+      .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
+      .then(({ ok, body }) => {
+        if (!ok) throw new Error(body.error ?? "Не вдалося створити посаду");
+        setNewPosTitle("");
+        setNewPosLevel("10");
+        setSelectedId(body.id);
+        loadCatalog();
+      })
+      .catch((e) => setPosError(e.message))
+      .finally(() => setPosCreating(false));
+  };
+
+  const updatePosition = (patch: Record<string, unknown>) => {
+    if (selectedId == null) return;
+    fetch(`/api/position-profiles/${selectedId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    })
+      .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
+      .then(({ ok, body }) => {
+        if (!ok) throw new Error(body.error ?? "Не вдалося зберегти");
+        loadDetail();
+        loadCatalog();
+      })
+      .catch((e) => setError(e.message));
+  };
+
+  const toggleExtraModule = (module: string, on: boolean) => {
+    if (!detail) return;
+    const current = new Set(detail.moduleFlags ?? []);
+    if (on) current.add(module);
+    else current.delete(module);
+    updatePosition({ extraModules: [...current] });
   };
 
   const [attestationForm, setAttestationForm] = useState<AttestationForm | null>(null);
@@ -356,9 +418,13 @@ export default function CatalogPage() {
       url: matUrl.trim() || null,
       durationMin: matDuration ? Number(matDuration) : null,
       sendViaBot: matSendViaBot,
+      // Тип можна міняти і при редагуванні (правки 20.09.2026, п.9) — контент
+      // матеріалу може змінитись з часом. Компетенція лишається незмінною
+      // назавжди після створення — щоб не поламати вже пройдені зв'язки
+      // навчання-компетенція.
+      type: matType,
     };
     if (!editingMatId) {
-      payload.type = matType;
       payload.competencyId = Number(matCompetencyId);
     }
     fetch(url, {
@@ -601,7 +667,8 @@ export default function CatalogPage() {
 
         {tab === "pos" && (
           <div className="grid gap-4 lg:grid-cols-3">
-            <div className="border border-slate-200 bg-white rounded-md p-1 lg:col-span-1">
+            <div className="space-y-3 lg:col-span-1">
+            <div className="border border-slate-200 bg-white rounded-md p-1">
               {profiles.map((p) => (
                 <button
                   key={p.id}
@@ -616,26 +683,198 @@ export default function CatalogPage() {
               ))}
             </div>
 
+            {canEdit && (
+              <div className="border border-slate-200 bg-white rounded-md p-3 space-y-2">
+                <p className="text-xs font-medium text-slate-600">+ Створити посаду</p>
+                <input
+                  type="text"
+                  value={newPosTitle}
+                  onChange={(e) => setNewPosTitle(e.target.value)}
+                  placeholder="Назва посади"
+                  className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm"
+                />
+                <div className="flex items-center gap-2">
+                  <label className="flex items-center gap-1.5 text-xs text-slate-600">
+                    Рівень
+                    <Hint text="Умовний ранг посади: вищий рівень (≥30) типово означає керівну позицію (додає модуль «Управління» в онбординг). За замовчуванням ні на що більше не впливає — усі права доступу все одно налаштовуються окремо на сторінці «Права доступу»." />
+                    <input
+                      type="number"
+                      value={newPosLevel}
+                      onChange={(e) => setNewPosLevel(e.target.value)}
+                      className="w-16 rounded border border-slate-300 px-2 py-1 text-sm"
+                    />
+                  </label>
+                  <button
+                    disabled={posCreating || !newPosTitle.trim()}
+                    onClick={createPosition}
+                    className="ml-auto rounded bg-slate-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-700 disabled:opacity-50"
+                  >
+                    Створити
+                  </button>
+                </div>
+                {posError && <p className="text-xs text-rose-700">{posError}</p>}
+                <p className="text-[11px] text-slate-400">Решту параметрів (Каса, Матвідповідальність тощо) налаштуєте одразу після створення, праворуч.</p>
+              </div>
+            )}
+            </div>
+
             <div className="space-y-4 lg:col-span-2">
               {detail && (
                 <>
-                  <Section title={detail.title}>
+                  <Section
+                    title={
+                      canEdit ? (
+                        <input
+                          key={detail.id + detail.title}
+                          defaultValue={detail.title}
+                          onBlur={(e) => e.target.value.trim() && e.target.value !== detail.title && updatePosition({ title: e.target.value.trim() })}
+                          className="rounded border border-transparent bg-transparent px-1 py-0.5 font-semibold text-slate-800 hover:border-slate-300 focus:border-slate-400 focus:bg-white"
+                        />
+                      ) : (
+                        detail.title
+                      )
+                    }
+                    right={
+                      canEdit && (
+                        <button
+                          onClick={() => updatePosition({ isActive: !detail.isActive })}
+                          className={`rounded border px-2 py-1 text-xs ${detail.isActive ? "border-slate-300 text-slate-600 hover:bg-slate-50" : "border-emerald-300 text-emerald-700 hover:bg-emerald-50"}`}
+                        >
+                          {detail.isActive ? "Архівувати" : "Активувати"}
+                        </button>
+                      )
+                    }
+                  >
                     <div className="grid grid-cols-2 gap-4 px-4 py-3 text-sm sm:grid-cols-4">
                       <div>
-                        <p className="text-slate-500">Рівень</p>
-                        <p className="tabular-nums text-slate-900">{detail.level}</p>
+                        <p className="flex items-center gap-1 text-slate-500">
+                          Рівень
+                          <Hint text="Умовний ранг посади. Рівень ≥30 автоматично додає модуль «Управління» в онбординг. Права доступу від рівня НЕ залежать — вони налаштовуються окремо на сторінці «Права доступу»." />
+                        </p>
+                        {canEdit ? (
+                          <input
+                            key={detail.id + String(detail.level)}
+                            type="number"
+                            defaultValue={detail.level}
+                            onBlur={(e) => Number(e.target.value) !== detail.level && updatePosition({ level: Number(e.target.value) })}
+                            className="mt-0.5 w-16 rounded border border-slate-300 px-1.5 py-0.5 text-sm tabular-nums"
+                          />
+                        ) : (
+                          <p className="tabular-nums text-slate-900">{detail.level}</p>
+                        )}
                       </div>
                       <div>
-                        <p className="text-slate-500">Каса</p>
-                        <p className="text-slate-900">{detail.requiresCashierAccount ? "так" : "ні"}</p>
+                        <p className="flex items-center gap-1 text-slate-500">
+                          Каса
+                          <Hint text="Посада працює з касовим апаратом — додає в онбординг реєстрацію на касі й тест «Каса»." />
+                        </p>
+                        {canEdit ? (
+                          <input
+                            type="checkbox"
+                            checked={detail.requiresCashierAccount}
+                            onChange={(e) => updatePosition({ requiresCashierAccount: e.target.checked })}
+                            className="mt-1 h-4 w-4"
+                          />
+                        ) : (
+                          <p className="text-slate-900">{detail.requiresCashierAccount ? "так" : "ні"}</p>
+                        )}
                       </div>
                       <div>
-                        <p className="text-slate-500">Матвідповідальність</p>
-                        <p className="text-slate-900">{detail.isMateriallyLiable ? "так" : "ні"}</p>
+                        <p className="flex items-center gap-1 text-slate-500">
+                          Матвідповідальність
+                          <Hint text="Посада матеріально відповідальна (МВО) — додає договір про матвідповідальність в онбординг і пункт передачі ТМЦ при звільненні/переведенні." />
+                        </p>
+                        {canEdit ? (
+                          <input
+                            type="checkbox"
+                            checked={detail.isMateriallyLiable}
+                            onChange={(e) => updatePosition({ isMateriallyLiable: e.target.checked })}
+                            className="mt-1 h-4 w-4"
+                          />
+                        ) : (
+                          <p className="text-slate-900">{detail.isMateriallyLiable ? "так" : "ні"}</p>
+                        )}
                       </div>
                       <div>
-                        <p className="text-slate-500">Харчова група</p>
-                        <p className="text-slate-900">{detail.isFoodHandling ? "так" : "ні"}</p>
+                        <p className="flex items-center gap-1 text-slate-500">
+                          Харчова група
+                          <Hint text="Посада працює з харчовими продуктами — додає в онбординг медкнижку, інструктаж із санітарії/HACCP і тест «Санітарія»." />
+                        </p>
+                        {canEdit ? (
+                          <input
+                            type="checkbox"
+                            checked={detail.isFoodHandling}
+                            onChange={(e) => updatePosition({ isFoodHandling: e.target.checked })}
+                            className="mt-1 h-4 w-4"
+                          />
+                        ) : (
+                          <p className="text-slate-900">{detail.isFoodHandling ? "так" : "ні"}</p>
+                        )}
+                      </div>
+                      <div>
+                        <p className="flex items-center gap-1 text-slate-500">
+                          Може бути куратором
+                          <Hint text="Людина на цій посаді в принципі може навчати стажерів (загальна ознака посади). Кого САМЕ призначити куратором — вирішує адміністратор об'єкта при онбордингу, з перевіркою її чинних компетенцій." />
+                        </p>
+                        {canEdit ? (
+                          <input
+                            type="checkbox"
+                            checked={detail.canBeCurator}
+                            onChange={(e) => updatePosition({ canBeCurator: e.target.checked })}
+                            className="mt-1 h-4 w-4"
+                          />
+                        ) : (
+                          <p className="text-slate-900">{detail.canBeCurator ? "так" : "ні"}</p>
+                        )}
+                      </div>
+                      <div>
+                        <p className="flex items-center gap-1 text-slate-500">
+                          Функціональна роль
+                          <Hint text="Наскрізна роль поза рівневою ієрархією (бухгалтер, оператор 1С, ревізор, керівництво, сисадмін) — дає доступ до окремих функцій системи незалежно від об'єкта. Порожньо — звичайна лінійна/керівна посада без такої ролі." />
+                        </p>
+                        {canEdit ? (
+                          <select
+                            value={detail.systemRole ?? ""}
+                            onChange={(e) => updatePosition({ systemRole: e.target.value || null })}
+                            className="mt-0.5 rounded border border-slate-300 px-1.5 py-0.5 text-sm"
+                          >
+                            <option value="">—</option>
+                            {["ONEC_ADMIN", "ACCOUNTANT", "AUDITOR", "COO", "SYSADMIN"].map((r) => (
+                              <option key={r} value={r}>
+                                {r}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <p className="text-slate-900">{detail.systemRole ?? "—"}</p>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="border-t border-slate-100 px-4 py-3">
+                      <p className="flex items-center gap-1 text-sm text-slate-500">
+                        Додаткові модулі онбордингу
+                        <Hint text="Ці п'ять модулів (роздріб/склад/транспорт/охорона/офіс) не мають окремого прапорця вище — вмикайте вручну, якщо посаді потрібне відповідне навчання." />
+                      </p>
+                      <div className="mt-1.5 flex flex-wrap gap-3 text-sm">
+                        {[
+                          ["RETAIL", "Роздріб"],
+                          ["WAREHOUSE", "Склад"],
+                          ["TRANSPORT", "Транспорт"],
+                          ["SECURITY", "Охорона"],
+                          ["OFFICE", "Офіс"],
+                        ].map(([code, label]) => (
+                          <label key={code} className="flex items-center gap-1.5 text-slate-700">
+                            <input
+                              type="checkbox"
+                              disabled={!canEdit}
+                              checked={detail.moduleFlags?.includes(code) ?? false}
+                              onChange={(e) => toggleExtraModule(code, e.target.checked)}
+                              className="h-4 w-4"
+                            />
+                            {label}
+                          </label>
+                        ))}
                       </div>
                     </div>
                   </Section>
@@ -1013,8 +1252,7 @@ export default function CatalogPage() {
                   <select
                     value={matType}
                     onChange={(e) => setMatType(e.target.value as "PDF" | "VIDEO" | "LINK")}
-                    disabled={!!editingMatId}
-                    className="rounded border border-slate-300 px-2 py-1.5 text-sm disabled:bg-slate-100"
+                    className="rounded border border-slate-300 px-2 py-1.5 text-sm"
                   >
                     <option value="PDF">PDF</option>
                     <option value="VIDEO">Відео</option>

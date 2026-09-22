@@ -1,0 +1,3 @@
+-- AlterEnum
+ALTER TYPE "Capability" ADD VALUE 'FORCE_COMPLETE_TASK';
+

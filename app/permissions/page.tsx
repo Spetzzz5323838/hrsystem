@@ -1,8 +1,16 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { X } from "lucide-react";
+import { HelpCircle, X } from "lucide-react";
 import AppShell from "../components/AppShell";
+
+function Hint({ text }: { text: string }) {
+  return (
+    <span title={text} className="inline-flex cursor-help align-text-top text-slate-400 hover:text-slate-600">
+      <HelpCircle size={13} />
+    </span>
+  );
+}
 
 type ProfilesData = { capabilities: string[]; profiles: { id: number; name: string; capabilities: string[] }[] };
 type PositionProfile = { id: number; title: string; level: number };
@@ -40,6 +48,10 @@ const CAPABILITY_LABELS: Record<string, string> = {
   INIT_TRANSFER: "Ініціація переведення",
   APPROVE_TRANSFER: "Погодження переведення",
   MANAGE_PERMISSIONS: "Керування правами доступу",
+  APPROVE_VACATION: "Погодження відпустки",
+  PRINT_BADGE: "Друк бейджа-перепустки",
+  RESET_CABINET_PASSWORD: "Скидання пароля кабінету",
+  FORCE_COMPLETE_TASK: "Примусове завершення пункту чек-листа",
 };
 
 const SCOPE_LABELS: Record<string, string> = {
@@ -279,6 +291,7 @@ function AssignmentsSection({ data, reload }: { data: AssignmentsData; reload: (
                     </option>
                   ))}
                 </select>
+                <Hint text="Область — межа дії профілю по дереву об'єктів, від вужчої до ширшої: тільки себе → підлеглі → свій відділ → свій об'єкт → своє піддерево (кілька об'єктів) → уся компанія." />
                 <button
                   onClick={() => addAssignment(row)}
                   disabled={!pendingProfileId[row.key] || !pendingScope[row.key]}
@@ -364,6 +377,21 @@ export default function PermissionsPage() {
       <div className="space-y-6">
         <h2 className="text-xl font-semibold text-slate-900">Права доступу</h2>
         {error && <p className="text-sm text-rose-700">{error}</p>}
+
+        <div className="rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+          <p>
+            <span className="font-medium">Як це налаштовується:</span> два незалежні кроки. Спершу — «Профілі доступу»: набір можливостей під назвою
+            («Бухгалтерія», «Повне управління персоналом» тощо), без прив&rsquo;язки до конкретного об&rsquo;єкта. Потім — «Призначення»: якій посаді чи
+            функціональній ролі дати який профіль і в межах якої області (свій об&rsquo;єкт, своє піддерево, уся компанія тощо). Той самий профіль можна
+            дати різним посадам з різною областю — не потрібно заводити копію під кожну.
+          </p>
+          <p className="mt-2">
+            <span className="font-medium">Функціональні ролі</span> (вкладка «Ролі» у блоці «Призначення» нижче) — це бухгалтер, оператор 1С, ревізор,
+            керівництво, системний адміністратор. Вони НЕ входять у звичайну рівневу ієрархію посад (адміністратор магазину → директор кластера тощо) —
+            це наскрізні функції, які може мати людина незалежно від того, на якій посаді вона працює й у якому магазині. Призначаються через ту саму
+            вкладку «Ролі», окремо від посад.
+          </p>
+        </div>
 
         <div className="space-y-2">
           <h3 className="text-sm font-semibold text-slate-800">Профілі доступу — що можна</h3>

@@ -1,0 +1,3 @@
+-- AlterEnum
+ALTER TYPE "Capability" ADD VALUE 'RESET_CABINET_PASSWORD';
+

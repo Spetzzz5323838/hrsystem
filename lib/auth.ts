@@ -2,6 +2,7 @@ import argon2 from "argon2";
 import { createHash, randomBytes, randomInt } from "node:crypto";
 import { cookies } from "next/headers";
 import { prisma } from "./prisma";
+import { logAudit } from "./audit";
 import { EmploymentStatus, LoginChallengeStatus, Role } from "../generated/prisma/client";
 
 const SESSION_COOKIE_NAME = "hr_session";
@@ -25,6 +26,19 @@ export function generateCabinetPassword(): string {
 
 export async function verifyPassword(hash: string, password: string): Promise<boolean> {
   return argon2.verify(hash, password);
+}
+
+/**
+ * Скидає пароль кабінету на новий випадковий (правки 20.09.2026, п.1) —
+ * старий одразу недійсний. `actorEmploymentId: null` — самообслуговування
+ * через бот (людина скидає собі сама); інакше — адміністратор через веб
+ * (гейт RESET_CABINET_PASSWORD перевіряється в API-роуті, не тут).
+ */
+export async function resetCabinetPassword(personId: number, actorEmploymentId: number | null): Promise<string> {
+  const password = generateCabinetPassword();
+  await prisma.person.update({ where: { id: personId }, data: { passwordHash: await hashPassword(password) } });
+  await logAudit({ actorId: actorEmploymentId, action: "auth.cabinetPasswordReset", entityType: "Person", entityId: personId });
+  return password;
 }
 
 function hashToken(token: string): string {

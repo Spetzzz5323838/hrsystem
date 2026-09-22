@@ -82,6 +82,14 @@ enum Capability {
   /// доступне; інші типи сканів (паспорт, медкнижка тощо) лишаються
   /// недоступними, як і раніше.
   PRINT_BADGE
+  /// Ручний скид пароля кабінету адміністратором (правки 20.09.2026, п.1) —
+  /// поруч із самообслуговуванням через бот (lib/auth.ts::resetCabinetPassword,
+  /// той самий код, різні виклики). Докс власної можливості не називають.
+  RESET_CABINET_PASSWORD
+  /// Примусове завершення пункту чек-листа сисадміном (правки 20.09.2026,
+  /// п.9) — щоб процес не зависав, якщо призначений виконавець фізично
+  /// недоступний (напр. втратив доступ до свого Telegram).
+  FORCE_COMPLETE_TASK
 }
 
 enum EmploymentStatus {
@@ -379,28 +387,55 @@ model Employment {
   headOfNodes     OrgNode[]
   roleAssignments RoleAssignment[]
 
-  processInstances         ProcessInstance[]
-  assignedTasks            Task[]               @relation("TaskAssignee")
-  completedTasks           Task[]               @relation("TaskCompletedBy")
-  authoredRatingEvents     RatingEvent[]        @relation("RatingEventAuthor")
-  awardedBadges            BadgeAward[]         @relation("BadgeAwardedBy")
-  clearanceSheets          ClearanceSheet[]
-  uploadedDocuments        Document[]
-  responsibleEquipment     Equipment[]
-  equipmentEvents          EquipmentEvent[]     @relation("EquipmentEventEmployment")
-  performedEquipmentEvents EquipmentEvent[]     @relation("EquipmentEventPerformedBy")
-  auditActions             AuditLog[]
-  attestationAttempts      AttestationAttempt[]
-  gradedAttestations       AttestationAttempt[] @relation("AttestationGradedBy")
-  reviews                  Review[]
-  confirmedReviews         Review[]             @relation("ReviewConfirmedBy")
-  createdReviews           Review[]             @relation("ReviewCreatedBy")
-  vacationRequests         VacationRequest[]
-  createdVacationRequests  VacationRequest[]    @relation("VacationCreatedBy")
-  decidedVacationRequests  VacationRequest[]    @relation("VacationDecidedBy")
+  processInstances            ProcessInstance[]
+  assignedTasks               Task[]               @relation("TaskAssignee")
+  completedTasks              Task[]               @relation("TaskCompletedBy")
+  authoredRatingEvents        RatingEvent[]        @relation("RatingEventAuthor")
+  awardedBadges               BadgeAward[]         @relation("BadgeAwardedBy")
+  clearanceSheets             ClearanceSheet[]
+  uploadedDocuments           Document[]
+  responsibleEquipment        Equipment[]
+  equipmentEvents             EquipmentEvent[]     @relation("EquipmentEventEmployment")
+  performedEquipmentEvents    EquipmentEvent[]     @relation("EquipmentEventPerformedBy")
+  auditActions                AuditLog[]
+  attestationAttempts         AttestationAttempt[]
+  gradedAttestations          AttestationAttempt[] @relation("AttestationGradedBy")
+  reviews                     Review[]
+  confirmedReviews            Review[]             @relation("ReviewConfirmedBy")
+  createdReviews              Review[]             @relation("ReviewCreatedBy")
+  vacationRequests            VacationRequest[]
+  createdVacationRequests     VacationRequest[]    @relation("VacationCreatedBy")
+  decidedVacationRequests     VacationRequest[]    @relation("VacationDecidedBy")
+  remindersAbout              Reminder[]           @relation("ReminderAboutEmployment")
+  authoredReminders           Reminder[]           @relation("ReminderAuthor")
+  curatorEligibilities        CuratorEligibility[] @relation("CuratorEligibilities")
+  grantedCuratorEligibilities CuratorEligibility[] @relation("CuratorEligibilityGrantedBy")
 
   @@index([personId])
   @@index([staffUnitId])
+}
+
+/// Особисті нагадування (правки 20.09.2026, п.7) — не пункт чек-ліста
+/// (Task), а вільна нотатка автора про конкретного працівника; видима
+/// лише самому автору. Гейт MANAGE_REMINDERS — можливість існувала в
+/// enum Capability з першої сесії проєкту, коду під неї не було.
+model Reminder {
+  id           Int        @id @default(autoincrement())
+  employmentId Int
+  employment   Employment @relation("ReminderAboutEmployment", fields: [employmentId], references: [id])
+  authorId     Int
+  author       Employment @relation("ReminderAuthor", fields: [authorId], references: [id])
+  text         String
+  dueAt        DateTime?
+  isDone       Boolean    @default(false)
+  doneAt       DateTime?
+  /// Щоб щогодинна перевірка (bot/index.ts) не дублювала сповіщення —
+  /// той самий принцип, що й Task.overdueNotifiedAt.
+  notifiedAt   DateTime?
+  createdAt    DateTime   @default(now())
+
+  @@index([authorId])
+  @@index([employmentId])
 }
 
 /// Глобальний каталог посад — редагується без розробника.
@@ -423,6 +458,25 @@ model PositionProfile {
   positionCompetencies   PositionCompetency[]
   attestationTemplate    AttestationTemplate?
   reviewCriterionWeights ReviewCriterionWeight[]
+  curatorEligibilities   CuratorEligibility[]
+}
+
+/// Кураторство "з людини" (правки 20.09.2026, п.9) — точніший, per-людина
+/// шар над PositionProfile.canBeCurator (той лишається загальною ознакою
+/// посади). Адміністратор вручну обирає, для яких посад САМЕ ЦЯ людина
+/// може бути куратором; grant перевіряє її чинні компетенції відносно
+/// вимог цільової посади (lib/curator.ts::grantCuratorEligibility).
+model CuratorEligibility {
+  id                Int             @id @default(autoincrement())
+  employmentId      Int
+  employment        Employment      @relation("CuratorEligibilities", fields: [employmentId], references: [id])
+  positionProfileId Int
+  positionProfile   PositionProfile @relation(fields: [positionProfileId], references: [id])
+  grantedById       Int
+  grantedBy         Employment      @relation("CuratorEligibilityGrantedBy", fields: [grantedById], references: [id])
+  createdAt         DateTime        @default(now())
+
+  @@unique([employmentId, positionProfileId])
 }
 
 /// Штатна одиниця — посада, розставлена в конкретний вузол дерева.
@@ -1000,14 +1054,14 @@ enum NotificationStatus {
 /// означає "останній зареєстрований збій", а не "вичерпано всі ретраї" —
 /// pg-boss може ще повторити спробу, і статус тоді перепишеться на SENT.
 model Notification {
-  id          Int                 @id @default(autoincrement())
+  id          Int                @id @default(autoincrement())
   recipientId Int
-  recipient   Person              @relation(fields: [recipientId], references: [id])
+  recipient   Person             @relation(fields: [recipientId], references: [id])
   templateKey String?
   text        String
-  status      NotificationStatus  @default(QUEUED)
+  status      NotificationStatus @default(QUEUED)
   error       String?
-  createdAt   DateTime            @default(now())
+  createdAt   DateTime           @default(now())
   sentAt      DateTime?
 
   @@index([recipientId])

@@ -38,7 +38,19 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const actor = await prisma.employment.findFirst({ where: { personId: session.id, status: { not: EmploymentStatus.TERMINATED } } });
   if (!actor) return NextResponse.json({ error: "У вас немає активного працевлаштування" }, { status: 400 });
 
-  const result = await decideVacationRequest(requestId, decision, actor.id, body?.rejectReason ?? null);
+  // Погоджувач може за потреби запропонувати інші дати замість бажаних
+  // (правки 20.09.2026, п.11) — обидва поля або жодного, часткову пару не приймаємо.
+  let newDates: { fromDate: Date; toDate: Date } | undefined;
+  if (typeof body?.fromDate === "string" && typeof body?.toDate === "string") {
+    const fromDate = new Date(body.fromDate);
+    const toDate = new Date(body.toDate);
+    if (Number.isNaN(fromDate.getTime()) || Number.isNaN(toDate.getTime()) || fromDate > toDate) {
+      return NextResponse.json({ error: "Невірні дати" }, { status: 400 });
+    }
+    newDates = { fromDate, toDate };
+  }
+
+  const result = await decideVacationRequest(requestId, decision, actor.id, body?.rejectReason ?? null, newDates);
   if (!result.ok) return NextResponse.json({ error: result.error }, { status: 409 });
   return NextResponse.json({ ok: true });
 }
