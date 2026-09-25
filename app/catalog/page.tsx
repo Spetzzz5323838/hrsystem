@@ -1100,7 +1100,10 @@ export default function CatalogPage() {
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {materials.map((m) => {
-                  const href = m.url ?? (m.hasFile ? `/api/materials/${m.id}/file` : null);
+                  // Завантажений файл важливіший за url — деякі старі матеріали мають
+                  // застарілий url (напр. мережевий шлях, набраний до появи
+                  // завантаження файлу), який браузер відкрити не може.
+                  const href = m.hasFile ? `/api/materials/${m.id}/file` : m.url;
                   return (
                   <tr key={m.id}>
                     <td className="px-4 py-2 text-slate-800">

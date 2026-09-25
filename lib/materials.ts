@@ -81,9 +81,13 @@ export async function replaceMaterialFile(materialId: number, file: File): Promi
 
   if (existing.filePath) await fs.rm(existing.filePath, { force: true });
 
+  // url теж обнуляємо — файл, що реально є на диску, завжди має пріоритет
+  // (знайдений баг: старий url типу "\\сервер\Support\..." лишався в базі
+  // від ручного редагування до появи завантаження файлів і "затуляв"
+  // клікабельне посилання на щойно завантажений робочий файл).
   await prisma.material.update({
     where: { id: materialId },
-    data: { filePath, originalName: file.name, mimeType: file.type },
+    data: { filePath, originalName: file.name, mimeType: file.type, url: null },
   });
 
   return { ok: true };

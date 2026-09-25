@@ -239,7 +239,8 @@ export default function MePage() {
         ) : (
           <ul className="divide-y divide-slate-100">
             {materials.map((m) => {
-              const href = m.url ?? (m.hasFile ? `/api/materials/${m.id}/file` : null);
+              // Завантажений файл важливіший за url — див. app/catalog/page.tsx.
+              const href = m.hasFile ? `/api/materials/${m.id}/file` : m.url;
               return (
                 <li key={m.id} className="flex items-center justify-between gap-2 px-4 py-2.5 text-sm">
                   {href ? (
