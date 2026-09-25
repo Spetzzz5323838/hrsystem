@@ -20,6 +20,7 @@ export async function GET() {
       id: c.id,
       code: c.code,
       name: c.name,
+      category: c.category,
       validMonths: c.validMonths,
       resetOnBreakMonths: c.resetOnBreakMonths,
       isBonus: c.isBonus,
@@ -41,10 +42,12 @@ export async function POST(request: NextRequest) {
   if (!code || !name) return NextResponse.json({ error: "Потрібні код і назва" }, { status: 400 });
 
   try {
+    const category = typeof body?.category === "string" && body.category.trim() ? body.category.trim() : null;
     const competency = await prisma.competency.create({
       data: {
         code,
         name,
+        category,
         validMonths: body?.validMonths != null ? Number(body.validMonths) : null,
         resetOnBreakMonths: body?.resetOnBreakMonths != null ? Number(body.resetOnBreakMonths) : null,
         isBonus: Boolean(body?.isBonus),

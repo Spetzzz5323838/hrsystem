@@ -194,25 +194,28 @@ function computeModuleFlags(p: PositionProfileSeed): ChecklistModule[] {
 type CompetencySeed = {
   code: string;
   name: string;
+  category?: string;
   validMonths?: number;
   resetOnBreakMonths?: number;
   isBonus?: boolean;
 };
 
-// docs/hr-transfers-competencies-v1.2.md §1, таблиця «Стартові строки дії»
+// docs/hr-transfers-competencies-v1.2.md §1, таблиця «Стартові строки дії».
+// category — групування для навігації в "Довідниках" (2026-09-25),
+// запропоновано мною, не з докс; лише 6 категорій на 12 компетенцій.
 const competencies: CompetencySeed[] = [
-  { code: "COMPANY_BASICS", name: "Компанія і структура", resetOnBreakMonths: 12 },
-  { code: "LABOR_SAFETY", name: "Охорона праці", validMonths: 12 },
-  { code: "FIRE_SAFETY", name: "Пожежна безпека", validMonths: 12 },
-  { code: "SANITATION_HACCP", name: "Санітарія і HACCP", validMonths: 12 },
-  { code: "SERVICE_STANDARDS", name: "Стандарти обслуговування", validMonths: 24, resetOnBreakMonths: 18 },
-  { code: "CASHIER_PRRO", name: "Каса і ПРРО", validMonths: 24, resetOnBreakMonths: 12 },
-  { code: "WEIGHED_GOODS_DATES", name: "Ваговий товар і терміни", validMonths: 24, resetOnBreakMonths: 18 },
-  { code: "MATERIAL_LIABILITY", name: "Матвідповідальність", validMonths: 24, resetOnBreakMonths: 12 },
-  { code: "BAKING_TECHNOLOGY", name: "Технологія випічки", validMonths: 24, resetOnBreakMonths: 18 },
-  { code: "BAKERY_EQUIPMENT", name: "Обладнання цеху", validMonths: 24, resetOnBreakMonths: 12 },
-  { code: "ROAD_SAFETY", name: "Безпека дорожнього руху", validMonths: 12 },
-  { code: "TRADE_RULES", name: "Правила торгівлі", validMonths: 12, isBonus: true },
+  { code: "COMPANY_BASICS", name: "Компанія і структура", category: "Загальне", resetOnBreakMonths: 12 },
+  { code: "LABOR_SAFETY", name: "Охорона праці", category: "Охорона праці й безпека", validMonths: 12 },
+  { code: "FIRE_SAFETY", name: "Пожежна безпека", category: "Охорона праці й безпека", validMonths: 12 },
+  { code: "ROAD_SAFETY", name: "Безпека дорожнього руху", category: "Охорона праці й безпека", validMonths: 12 },
+  { code: "SANITATION_HACCP", name: "Санітарія і HACCP", category: "Санітарія та якість", validMonths: 12 },
+  { code: "SERVICE_STANDARDS", name: "Стандарти обслуговування", category: "Торгівля й обслуговування", validMonths: 24, resetOnBreakMonths: 18 },
+  { code: "WEIGHED_GOODS_DATES", name: "Ваговий товар і терміни", category: "Торгівля й обслуговування", validMonths: 24, resetOnBreakMonths: 18 },
+  { code: "TRADE_RULES", name: "Правила торгівлі", category: "Торгівля й обслуговування", validMonths: 12, isBonus: true },
+  { code: "CASHIER_PRRO", name: "Каса і ПРРО", category: "Каса та матвідповідальність", validMonths: 24, resetOnBreakMonths: 12 },
+  { code: "MATERIAL_LIABILITY", name: "Матвідповідальність", category: "Каса та матвідповідальність", validMonths: 24, resetOnBreakMonths: 12 },
+  { code: "BAKING_TECHNOLOGY", name: "Технологія випічки", category: "Виробництво", validMonths: 24, resetOnBreakMonths: 18 },
+  { code: "BAKERY_EQUIPMENT", name: "Обладнання цеху", category: "Виробництво", validMonths: 24, resetOnBreakMonths: 12 },
 ];
 
 async function seedPositionProfiles() {
@@ -243,6 +246,7 @@ async function seedCompetencies() {
       create: {
         code: c.code,
         name: c.name,
+        category: c.category,
         validMonths: c.validMonths,
         resetOnBreakMonths: c.resetOnBreakMonths,
         isBonus: c.isBonus ?? false,

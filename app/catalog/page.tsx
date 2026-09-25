@@ -13,6 +13,50 @@ function Hint({ text }: { text: string }) {
   );
 }
 
+type SortState<T extends string> = { field: T; dir: "asc" | "desc" };
+
+/** Клік по заголовку перемикає сортування (2026-09-25) — той самий стан для будь-якої таблиці "Довідників". */
+function toggleSort<T extends string>(current: SortState<T>, field: T): SortState<T> {
+  if (current.field === field) return { field, dir: current.dir === "asc" ? "desc" : "asc" };
+  return { field, dir: "asc" };
+}
+
+function compareValues(a: unknown, b: unknown): number {
+  if (a == null && b == null) return 0;
+  if (a == null) return -1;
+  if (b == null) return 1;
+  if (typeof a === "number" && typeof b === "number") return a - b;
+  if (typeof a === "boolean" && typeof b === "boolean") return Number(a) - Number(b);
+  return String(a).localeCompare(String(b), "uk");
+}
+
+function SortTh<T extends string>({
+  label,
+  field,
+  sort,
+  onSort,
+  align,
+}: {
+  label: string;
+  field: T;
+  sort: SortState<T>;
+  onSort: (field: T) => void;
+  align?: "right";
+}) {
+  const active = sort.field === field;
+  return (
+    <th
+      onClick={() => onSort(field)}
+      className={`cursor-pointer select-none px-4 py-2 font-medium hover:text-slate-800 ${align === "right" ? "text-right" : "text-left"}`}
+    >
+      <span className={`inline-flex items-center gap-1 ${align === "right" ? "flex-row-reverse" : ""}`}>
+        {label}
+        <span className="w-2.5 text-[10px] text-slate-400">{active ? (sort.dir === "asc" ? "▲" : "▼") : ""}</span>
+      </span>
+    </th>
+  );
+}
+
 type ProfileListItem = {
   id: number;
   title: string;
@@ -41,11 +85,25 @@ type CompetencyRow = {
   id: number;
   code: string;
   name: string;
+  category: string | null;
   validMonths: number | null;
   resetOnBreakMonths: number | null;
   isBonus: boolean;
   positionsUsing: number;
 };
+
+// Запропоновані категорії для групування компетенцій (2026-09-25) — не
+// жорсткий enum, просто список підказок у формі; адмін може вписати й
+// свою категорію (select із "своя..." нижче перемикає на текстове поле).
+const COMPETENCY_CATEGORIES = [
+  "Загальне",
+  "Охорона праці й безпека",
+  "Санітарія та якість",
+  "Торгівля й обслуговування",
+  "Каса та матвідповідальність",
+  "Виробництво",
+];
+const UNCATEGORIZED_LABEL = "Без категорії";
 
 type MaterialRow = {
   id: number;
@@ -94,6 +152,11 @@ export default function CatalogPage() {
 
   const [competencies, setCompetencies] = useState<CompetencyRow[] | null>(null);
   const [materials, setMaterials] = useState<MaterialRow[] | null>(null);
+  const [compSort, setCompSort] = useState<SortState<"name" | "validMonths" | "resetOnBreakMonths" | "positionsUsing">>({
+    field: "name",
+    dir: "asc",
+  });
+  const [matSort, setMatSort] = useState<SortState<"title" | "type" | "competencyName" | "sendViaBot">>({ field: "title", dir: "asc" });
 
   const loadCatalog = () => {
     Promise.all([
@@ -291,6 +354,7 @@ export default function CatalogPage() {
   const [editingCompId, setEditingCompId] = useState<number | null>(null);
   const [compCode, setCompCode] = useState("");
   const [compName, setCompName] = useState("");
+  const [compCategory, setCompCategory] = useState("");
   const [compValidMonths, setCompValidMonths] = useState("");
   const [compResetMonths, setCompResetMonths] = useState("");
   const [compIsBonus, setCompIsBonus] = useState(false);
@@ -302,6 +366,7 @@ export default function CatalogPage() {
     setEditingCompId(null);
     setCompCode("");
     setCompName("");
+    setCompCategory("");
     setCompValidMonths("");
     setCompResetMonths("");
     setCompIsBonus(false);
@@ -313,6 +378,7 @@ export default function CatalogPage() {
     setEditingCompId(c.id);
     setCompCode(c.code);
     setCompName(c.name);
+    setCompCategory(c.category ?? "");
     setCompValidMonths(c.validMonths != null ? String(c.validMonths) : "");
     setCompResetMonths(c.resetOnBreakMonths != null ? String(c.resetOnBreakMonths) : "");
     setCompIsBonus(c.isBonus);
@@ -324,6 +390,7 @@ export default function CatalogPage() {
     const payload = {
       code: compCode.trim(),
       name: compName.trim(),
+      category: compCategory || null,
       validMonths: compValidMonths ? Number(compValidMonths) : null,
       resetOnBreakMonths: compResetMonths ? Number(compResetMonths) : null,
       isBonus: compIsBonus,
@@ -924,6 +991,18 @@ export default function CatalogPage() {
                     className="w-64 rounded border border-slate-300 px-2 py-1.5 text-sm"
                   />
                   <input
+                    value={compCategory}
+                    onChange={(e) => setCompCategory(e.target.value)}
+                    placeholder="Категорія (для групування)"
+                    list="comp-categories"
+                    className="w-52 rounded border border-slate-300 px-2 py-1.5 text-sm"
+                  />
+                  <datalist id="comp-categories">
+                    {COMPETENCY_CATEGORIES.map((cat) => (
+                      <option key={cat} value={cat} />
+                    ))}
+                  </datalist>
+                  <input
                     value={compValidMonths}
                     onChange={(e) => setCompValidMonths(e.target.value)}
                     placeholder="Строк дії, міс"
@@ -953,45 +1032,83 @@ export default function CatalogPage() {
               </div>
             )}
             <table className="w-full text-sm">
-              <thead className="border-b border-slate-200 bg-slate-50 text-left text-xs text-slate-500">
+              <thead className="border-b border-slate-200 bg-slate-50 text-xs text-slate-500">
                 <tr>
-                  <th className="px-4 py-2 font-medium">Назва</th>
-                  <th className="px-4 py-2 font-medium">Строк дії</th>
-                  <th className="px-4 py-2 font-medium">Обнулення</th>
+                  <SortTh label="Назва" field="name" sort={compSort} onSort={(f) => setCompSort((s) => toggleSort(s, f))} />
+                  <SortTh label="Строк дії" field="validMonths" sort={compSort} onSort={(f) => setCompSort((s) => toggleSort(s, f))} />
+                  <SortTh label="Обнулення" field="resetOnBreakMonths" sort={compSort} onSort={(f) => setCompSort((s) => toggleSort(s, f))} />
                   <th className="px-4 py-2 font-medium">Тип</th>
-                  <th className="px-4 py-2 font-medium text-right">Посад використовують</th>
+                  <SortTh
+                    label="Посад використовують"
+                    field="positionsUsing"
+                    sort={compSort}
+                    onSort={(f) => setCompSort((s) => toggleSort(s, f))}
+                    align="right"
+                  />
                   {canEdit && <th className="px-4 py-2" />}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
-                {competencies.map((c) => (
-                  <tr key={c.id}>
-                    <td className="px-4 py-2 text-slate-800">{c.name}</td>
-                    <td className="px-4 py-2 text-slate-600">{c.validMonths ? `${c.validMonths} міс` : "безстроково"}</td>
-                    <td className="px-4 py-2 text-slate-600">{c.resetOnBreakMonths ? `${c.resetOnBreakMonths} міс` : "—"}</td>
-                    <td className="px-4 py-2">
-                      {c.isBonus ? (
-                        <span className="rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-600">бонусна</span>
-                      ) : (
-                        <span className="text-xs text-slate-400">обов&rsquo;язкова</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-2 text-right tabular-nums text-slate-600">{c.positionsUsing}</td>
-                    {canEdit && (
-                      <td className="px-4 py-2 text-right">
-                        <div className="flex justify-end gap-2">
-                          <button onClick={() => startEditCompetency(c)} className="text-xs text-slate-600 hover:text-slate-900">
-                            редагувати
-                          </button>
-                          <button onClick={() => deleteCompetency(c.id)} className="text-xs text-rose-600 hover:text-rose-800">
-                            видалити
-                          </button>
-                        </div>
-                      </td>
-                    )}
-                  </tr>
-                ))}
-              </tbody>
+              {(() => {
+                // Групування по категоріях (2026-09-25) — запропоновані категорії
+                // йдуть першими у фіксованому порядку, довільні (вписані вручну)
+                // — за абеткою, "Без категорії" завжди останньою.
+                const groups = new Map<string, CompetencyRow[]>();
+                for (const c of competencies) {
+                  const key = c.category ?? UNCATEGORIZED_LABEL;
+                  if (!groups.has(key)) groups.set(key, []);
+                  groups.get(key)!.push(c);
+                }
+                const customKeys = [...groups.keys()]
+                  .filter((k) => !COMPETENCY_CATEGORIES.includes(k) && k !== UNCATEGORIZED_LABEL)
+                  .sort((a, b) => a.localeCompare(b, "uk"));
+                const orderedKeys = [
+                  ...COMPETENCY_CATEGORIES.filter((cat) => groups.has(cat)),
+                  ...customKeys,
+                  ...(groups.has(UNCATEGORIZED_LABEL) ? [UNCATEGORIZED_LABEL] : []),
+                ];
+
+                return orderedKeys.map((category) => {
+                  const rows = [...groups.get(category)!].sort(
+                    (a, b) => (compSort.dir === "asc" ? 1 : -1) * compareValues(a[compSort.field], b[compSort.field]),
+                  );
+                  return (
+                    <tbody key={category} className="divide-y divide-slate-100">
+                      <tr className="bg-slate-50/70">
+                        <td colSpan={canEdit ? 6 : 5} className="px-4 py-1.5 text-xs font-semibold text-slate-500">
+                          {category} <span className="font-normal text-slate-400">({rows.length})</span>
+                        </td>
+                      </tr>
+                      {rows.map((c) => (
+                        <tr key={c.id}>
+                          <td className="px-4 py-2 text-slate-800">{c.name}</td>
+                          <td className="px-4 py-2 text-slate-600">{c.validMonths ? `${c.validMonths} міс` : "безстроково"}</td>
+                          <td className="px-4 py-2 text-slate-600">{c.resetOnBreakMonths ? `${c.resetOnBreakMonths} міс` : "—"}</td>
+                          <td className="px-4 py-2">
+                            {c.isBonus ? (
+                              <span className="rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-600">бонусна</span>
+                            ) : (
+                              <span className="text-xs text-slate-400">обов&rsquo;язкова</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-2 text-right tabular-nums text-slate-600">{c.positionsUsing}</td>
+                          {canEdit && (
+                            <td className="px-4 py-2 text-right">
+                              <div className="flex justify-end gap-2">
+                                <button onClick={() => startEditCompetency(c)} className="text-xs text-slate-600 hover:text-slate-900">
+                                  редагувати
+                                </button>
+                                <button onClick={() => deleteCompetency(c.id)} className="text-xs text-rose-600 hover:text-rose-800">
+                                  видалити
+                                </button>
+                              </div>
+                            </td>
+                          )}
+                        </tr>
+                      ))}
+                    </tbody>
+                  );
+                });
+              })()}
             </table>
           </Section>
         )}
@@ -1089,17 +1206,19 @@ export default function CatalogPage() {
               </div>
             )}
             <table className="w-full text-sm">
-              <thead className="border-b border-slate-200 bg-slate-50 text-left text-xs text-slate-500">
+              <thead className="border-b border-slate-200 bg-slate-50 text-xs text-slate-500">
                 <tr>
-                  <th className="px-4 py-2 font-medium">Матеріал</th>
-                  <th className="px-4 py-2 font-medium">Тип</th>
-                  <th className="px-4 py-2 font-medium">Компетенція</th>
-                  <th className="px-4 py-2 font-medium text-right">Канал</th>
+                  <SortTh label="Матеріал" field="title" sort={matSort} onSort={(f) => setMatSort((s) => toggleSort(s, f))} />
+                  <SortTh label="Тип" field="type" sort={matSort} onSort={(f) => setMatSort((s) => toggleSort(s, f))} />
+                  <SortTh label="Компетенція" field="competencyName" sort={matSort} onSort={(f) => setMatSort((s) => toggleSort(s, f))} />
+                  <SortTh label="Канал" field="sendViaBot" sort={matSort} onSort={(f) => setMatSort((s) => toggleSort(s, f))} align="right" />
                   {canEdit && <th className="px-4 py-2" />}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {materials.map((m) => {
+                {[...materials]
+                  .sort((a, b) => (matSort.dir === "asc" ? 1 : -1) * compareValues(a[matSort.field], b[matSort.field]))
+                  .map((m) => {
                   // Завантажений файл важливіший за url — деякі старі матеріали мають
                   // застарілий url (напр. мережевий шлях, набраний до появи
                   // завантаження файлу), який браузер відкрити не може.

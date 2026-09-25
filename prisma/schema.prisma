@@ -678,6 +678,10 @@ model Competency {
   id                 Int     @id @default(autoincrement())
   code               String  @unique
   name               String
+  /// Довільна категорія для групування в "Довідниках" (2026-09-25) —
+  /// не enum: невеликий, вільно редагований список, не частина основної
+  /// бізнес-логіки (на відміну від ChecklistModule тощо).
+  category           String?
   validMonths        Int?
   resetOnBreakMonths Int?
   isBonus            Boolean @default(false)

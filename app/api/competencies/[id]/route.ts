@@ -23,6 +23,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     where: { id: competencyId },
     data: {
       name,
+      category: body?.category !== undefined ? (typeof body.category === "string" && body.category.trim() ? body.category.trim() : null) : undefined,
       validMonths: body?.validMonths !== undefined ? (body.validMonths != null ? Number(body.validMonths) : null) : undefined,
       resetOnBreakMonths:
         body?.resetOnBreakMonths !== undefined ? (body.resetOnBreakMonths != null ? Number(body.resetOnBreakMonths) : null) : undefined,
