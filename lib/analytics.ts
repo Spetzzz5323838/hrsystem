@@ -573,6 +573,223 @@ export async function getRatingAuthorAnalytics(scopePaths: string[], monthsBack:
   return { months: monthsBack, onlyNegative, noRatings, sameEverything };
 }
 
+export type CuratorAnalyticsRow = {
+  curatorEmploymentId: number;
+  curatorName: string;
+  objectName: string;
+  currentlyTraining: number;
+  graduatedInPeriod: number;
+  hasMentorBadge: boolean;
+};
+export type CuratorAnalytics = { months: number; rows: CuratorAnalyticsRow[] };
+
+/**
+ * Звіт по кураторах — "хто скільки навчив/навчає" (правки 20.09.2026,
+ * п.13, не покрито жодним з попередніх звітів). "Навчає зараз" — скільки
+ * підопічних (Employment.curatorId) у статусі TRAINEE/READY_FOR_ATTESTATION;
+ * "навчив за період" — скільки підопічних досягли ACTIVE в межах monthsBack.
+ * Прямого поля дати активації нема, тому дата береться з AuditLog
+ * ("onboarding.activated", той самий запис, що вже показується у вкладці
+ * "Історія") — той самий підхід, що вже застосований для тривалостей
+ * етапів у getHiringFunnelAnalytics.
+ */
+export async function getCuratorAnalytics(scopePaths: string[], monthsBack: number): Promise<CuratorAnalytics> {
+  const from = new Date();
+  from.setMonth(from.getMonth() - monthsBack);
+
+  const curatees = await prisma.employment.findMany({
+    where: { curatorId: { not: null } },
+    include: { curator: { include: { person: true, staffUnit: { include: { orgNode: true } } } } },
+  });
+  const visible = curatees.filter((c) => c.curator && coveredByScope(scopePaths, c.curator.staffUnit.orgNode.path));
+
+  const graduatedLogs = await prisma.auditLog.findMany({
+    where: { action: "onboarding.activated", entityType: "Employment", createdAt: { gte: from } },
+    select: { entityId: true },
+  });
+  const graduatedIds = new Set(graduatedLogs.map((l) => l.entityId));
+
+  const mentorAwards = await prisma.badgeAward.findMany({ where: { badgeCode: "mentor" }, select: { personId: true } });
+  const mentorPersonIds = new Set(mentorAwards.map((a) => a.personId));
+
+  const byCurator = new Map<number, CuratorAnalyticsRow>();
+  for (const c of visible) {
+    const curator = c.curator!;
+    const row = byCurator.get(curator.id) ?? {
+      curatorEmploymentId: curator.id,
+      curatorName: curator.person.fullName,
+      objectName: curator.staffUnit.orgNode.name,
+      currentlyTraining: 0,
+      graduatedInPeriod: 0,
+      hasMentorBadge: mentorPersonIds.has(curator.personId),
+    };
+    if (c.status === EmploymentStatus.TRAINEE || c.status === EmploymentStatus.READY_FOR_ATTESTATION) row.currentlyTraining += 1;
+    if (graduatedIds.has(c.id)) row.graduatedInPeriod += 1;
+    byCurator.set(curator.id, row);
+  }
+
+  const rows = [...byCurator.values()].sort(
+    (a, b) => b.currentlyTraining + b.graduatedInPeriod - (a.currentlyTraining + a.graduatedInPeriod) || a.curatorName.localeCompare(b.curatorName, "uk"),
+  );
+
+  return { months: monthsBack, rows };
+}
+
+export type RatingSummaryNodeRow = {
+  id: number;
+  name: string;
+  positiveCount: number;
+  negativeCount: number;
+  reprimandCount: number;
+  awardCount: number;
+  netScore: number;
+};
+export type RatingSummaryPersonRow = {
+  personId: number;
+  fullName: string;
+  locationName: string;
+  positiveCount: number;
+  negativeCount: number;
+  reprimandCount: number;
+  awardCount: number;
+  netScore: number;
+};
+export type RatingSummaryAnalytics = {
+  months: number;
+  byObject: RatingSummaryNodeRow[];
+  byCluster: RatingSummaryNodeRow[];
+  topPositive: RatingSummaryPersonRow[];
+  topNegative: RatingSummaryPersonRow[];
+};
+
+const RATING_SUMMARY_TOP_N = 10;
+
+/**
+ * Підсумки рейтингу/нагород по об'єктах і кластерах + топ працівників за
+ * сумою балів (правки 20.09.2026, п.13). Лише для керівництва — той самий
+ * гейт VIEW_ANALYTICS, що й решта звітів; архітектурне рішення №8 з
+ * CLAUDE.md ("працівник не бачить свій бал") про видимість САМОМУ
+ * працівнику, цей звіт йому недоступний узагалі.
+ *
+ * "По об'єктах"/"по кластерах" — за тим самим спрощенням, що вже в
+ * getStaffingAnalytics/getTurnoverAnalytics: рахуються тільки вузли типу
+ * OBJECT/DIVISION (адміністративні відділи без такого предка — поза цими
+ * двома розбивками, але й далі в топ-списках працівників).
+ */
+export async function getRatingSummaryAnalytics(scopePaths: string[], monthsBack: number): Promise<RatingSummaryAnalytics> {
+  const from = new Date();
+  from.setMonth(from.getMonth() - monthsBack);
+
+  const events = await prisma.ratingEvent.findMany({
+    where: { cancelledAt: null, occurredAt: { gte: from }, type: { not: RatingType.AUTO } },
+  });
+  if (!events.length) return { months: monthsBack, byObject: [], byCluster: [], topPositive: [], topNegative: [] };
+
+  // НЕ фільтруємо за статусом — подія рейтингу лишається прив'язаною до
+  // місця, де вона сталась, навіть якщо людину відтоді звільнено (інакше
+  // саме найпоказовіші негативні події зникали б із звіту про об'єкт).
+  // Активне Employment пріоритетне (id за спаданням — найновіше), якщо
+  // такого нема — останнє з наявних.
+  const personIds = [...new Set(events.map((e) => e.personId))];
+  const employments = await prisma.employment.findMany({
+    where: { personId: { in: personIds } },
+    include: { staffUnit: { include: { orgNode: true } }, person: true },
+    orderBy: { id: "desc" },
+  });
+  const employmentByPerson = new Map<number, (typeof employments)[number]>();
+  for (const e of employments) {
+    const existing = employmentByPerson.get(e.personId);
+    if (!existing || (existing.status === EmploymentStatus.TERMINATED && e.status !== EmploymentStatus.TERMINATED)) {
+      employmentByPerson.set(e.personId, e);
+    }
+  }
+
+  const allNodes = await prisma.orgNode.findMany({ select: { id: true, type: true, path: true, name: true } });
+  const nodeById = new Map(allNodes.map((n) => [n.id, n]));
+  const findAncestor = (path: string, type: OrgNodeType) => {
+    const ids = path.split(".").map(Number);
+    for (let i = ids.length - 1; i >= 0; i--) {
+      const candidate = nodeById.get(ids[i]);
+      if (candidate?.type === type) return candidate;
+    }
+    return null;
+  };
+
+  const byObject = new Map<number, RatingSummaryNodeRow>();
+  const byCluster = new Map<number, RatingSummaryNodeRow>();
+  const byPerson = new Map<number, RatingSummaryPersonRow>();
+
+  const bump = (
+    row: { positiveCount: number; negativeCount: number; reprimandCount: number; awardCount: number; netScore: number },
+    type: RatingType,
+    points: number,
+  ) => {
+    if (type === RatingType.POSITIVE) row.positiveCount += 1;
+    else if (type === RatingType.NEGATIVE) row.negativeCount += 1;
+    else if (type === RatingType.REPRIMAND) row.reprimandCount += 1;
+    else if (type === RatingType.AWARD) row.awardCount += 1;
+    row.netScore += points;
+  };
+
+  for (const e of events) {
+    const employment = employmentByPerson.get(e.personId);
+    if (!employment) continue; // звільнені за період — без поточного місця, поза розбивкою
+    const nodePath = employment.staffUnit.orgNode.path;
+    if (!coveredByScope(scopePaths, nodePath)) continue;
+
+    const objectNode = findAncestor(nodePath, OrgNodeType.OBJECT);
+    if (objectNode) {
+      const row = byObject.get(objectNode.id) ?? {
+        id: objectNode.id,
+        name: objectNode.name,
+        positiveCount: 0,
+        negativeCount: 0,
+        reprimandCount: 0,
+        awardCount: 0,
+        netScore: 0,
+      };
+      bump(row, e.type, e.points);
+      byObject.set(objectNode.id, row);
+    }
+
+    const clusterNode = findAncestor(nodePath, OrgNodeType.DIVISION);
+    if (clusterNode) {
+      const row = byCluster.get(clusterNode.id) ?? {
+        id: clusterNode.id,
+        name: clusterNode.name,
+        positiveCount: 0,
+        negativeCount: 0,
+        reprimandCount: 0,
+        awardCount: 0,
+        netScore: 0,
+      };
+      bump(row, e.type, e.points);
+      byCluster.set(clusterNode.id, row);
+    }
+
+    const personRow = byPerson.get(e.personId) ?? {
+      personId: e.personId,
+      fullName: employment.person.fullName,
+      locationName: objectNode?.name ?? employment.staffUnit.orgNode.name,
+      positiveCount: 0,
+      negativeCount: 0,
+      reprimandCount: 0,
+      awardCount: 0,
+      netScore: 0,
+    };
+    bump(personRow, e.type, e.points);
+    byPerson.set(e.personId, personRow);
+  }
+
+  const byObjectRows = [...byObject.values()].sort((a, b) => a.name.localeCompare(b.name, "uk"));
+  const byClusterRows = [...byCluster.values()].sort((a, b) => a.name.localeCompare(b.name, "uk"));
+  const allPersons = [...byPerson.values()];
+  const topPositive = [...allPersons].sort((a, b) => b.netScore - a.netScore).slice(0, RATING_SUMMARY_TOP_N);
+  const topNegative = [...allPersons].sort((a, b) => a.netScore - b.netScore).slice(0, RATING_SUMMARY_TOP_N);
+
+  return { months: monthsBack, byObject: byObjectRows, byCluster: byClusterRows, topPositive, topNegative };
+}
+
 export type ExpiringCompetencyRow = {
   personId: number;
   fullName: string;

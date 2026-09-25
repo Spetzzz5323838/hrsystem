@@ -21,6 +21,7 @@ export async function GET(request: NextRequest) {
     include: {
       person: true,
       staffUnit: { include: { positionProfile: true, orgNode: true } },
+      curator: { include: { person: true } },
     },
     orderBy: { id: "asc" },
   });
@@ -36,6 +37,7 @@ export async function GET(request: NextRequest) {
     status: string;
     competencyDone: number;
     competencyTotal: number;
+    curatorName: string | null;
   }[] = [];
 
   // Видимість — за реальними правами (VIEW_EMPLOYEE), не за жорстким фільтром.
@@ -60,6 +62,7 @@ export async function GET(request: NextRequest) {
       status: employment.status,
       competencyDone: done,
       competencyTotal: delta.length,
+      curatorName: employment.curator?.person.fullName ?? null,
     });
   }
 

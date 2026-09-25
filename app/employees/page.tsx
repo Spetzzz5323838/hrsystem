@@ -16,6 +16,7 @@ type EmployeeRow = {
   status: string;
   competencyDone: number;
   competencyTotal: number;
+  curatorName: string | null;
 };
 
 type ListResponse = { employees: EmployeeRow[]; objects: { id: number; name: string }[]; total: number };
@@ -269,6 +270,7 @@ export default function EmployeesPage() {
                 <th className="px-4 py-2 font-medium">Посада</th>
                 <th className="px-4 py-2 font-medium">Місце роботи</th>
                 <th className="px-4 py-2 font-medium">Статус</th>
+                <th className="px-4 py-2 font-medium">Куратор</th>
                 <th className="px-4 py-2 font-medium">Компетенції</th>
               </tr>
             </thead>
@@ -289,6 +291,7 @@ export default function EmployeesPage() {
                   <td className="px-4 py-2">
                     <Badge status={e.status} />
                   </td>
+                  <td className="px-4 py-2 text-slate-600">{e.curatorName ?? <span className="text-slate-400">—</span>}</td>
                   <td className="px-4 py-2">
                     {e.competencyTotal > 0 ? (
                       <div className="flex items-center gap-2">
@@ -310,7 +313,7 @@ export default function EmployeesPage() {
               ))}
               {!data.employees.length && (
                 <tr>
-                  <td colSpan={5} className="px-4 py-8 text-center text-sm text-slate-500">
+                  <td colSpan={6} className="px-4 py-8 text-center text-sm text-slate-500">
                     Нікого не знайдено.
                   </td>
                 </tr>

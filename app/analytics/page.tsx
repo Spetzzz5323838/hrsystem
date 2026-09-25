@@ -86,6 +86,88 @@ const RATING_KEY_FALLBACK: Record<string, string> = {
   NEGATIVE: "Негатив (без приводу)",
 };
 
+type CuratorRow = {
+  curatorEmploymentId: number;
+  curatorName: string;
+  objectName: string;
+  currentlyTraining: number;
+  graduatedInPeriod: number;
+  hasMentorBadge: boolean;
+};
+type CuratorData = { months: number; rows: CuratorRow[] };
+
+type RatingSummaryNodeRow = {
+  id: number;
+  name: string;
+  positiveCount: number;
+  negativeCount: number;
+  reprimandCount: number;
+  awardCount: number;
+  netScore: number;
+};
+type RatingSummaryPersonRow = {
+  personId: number;
+  fullName: string;
+  locationName: string;
+  positiveCount: number;
+  negativeCount: number;
+  reprimandCount: number;
+  awardCount: number;
+  netScore: number;
+};
+type RatingSummaryData = {
+  months: number;
+  byObject: RatingSummaryNodeRow[];
+  byCluster: RatingSummaryNodeRow[];
+  topPositive: RatingSummaryPersonRow[];
+  topNegative: RatingSummaryPersonRow[];
+};
+
+function RatingSummaryTable({ rows }: { rows: RatingSummaryNodeRow[] }) {
+  if (!rows.length) return <p className="text-sm text-slate-400">Немає даних.</p>;
+  return (
+    <table className="w-full text-xs">
+      <tbody className="divide-y divide-slate-50">
+        {rows.map((r) => (
+          <tr key={r.id}>
+            <td className="py-1 text-slate-700">{r.name}</td>
+            <td className="w-28 py-1 text-right tabular-nums text-slate-500">
+              +{r.positiveCount}/−{r.negativeCount}
+              {r.awardCount > 0 && ` · 🏆${r.awardCount}`}
+              {r.reprimandCount > 0 && ` · ⚠${r.reprimandCount}`}
+            </td>
+            <td className={`w-16 py-1 text-right tabular-nums font-medium ${r.netScore >= 0 ? "text-emerald-700" : "text-rose-700"}`}>
+              {r.netScore > 0 ? "+" : ""}
+              {r.netScore}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function RatingSummaryPersonTable({ rows, positive }: { rows: RatingSummaryPersonRow[]; positive: boolean }) {
+  if (!rows.length) return <p className="text-sm text-slate-400">Немає даних.</p>;
+  return (
+    <table className="w-full text-xs">
+      <tbody className="divide-y divide-slate-50">
+        {rows.map((r) => (
+          <tr key={r.personId}>
+            <td className="py-1 text-slate-700">
+              {r.fullName} <span className="text-slate-400">— {r.locationName}</span>
+            </td>
+            <td className={`w-16 py-1 text-right tabular-nums font-medium ${positive ? "text-emerald-700" : "text-rose-700"}`}>
+              {r.netScore > 0 ? "+" : ""}
+              {r.netScore}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
 type ExpiringRow = {
   personId: number;
   fullName: string;
@@ -137,6 +219,10 @@ export default function AnalyticsPage() {
   const [ratingCategories, setRatingCategories] = useState<RatingCategoryOption[]>([]);
   const [expiring, setExpiring] = useState<ExpiringRow[] | null>(null);
   const [months, setMonths] = useState(3);
+  const [curators, setCurators] = useState<CuratorData | null>(null);
+  const [curatorMonths, setCuratorMonths] = useState(6);
+  const [ratingSummary, setRatingSummary] = useState<RatingSummaryData | null>(null);
+  const [ratingSummaryMonths, setRatingSummaryMonths] = useState(3);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -205,6 +291,26 @@ export default function AnalyticsPage() {
       })
       .catch((e) => setError(e.message));
   }, [months]);
+
+  useEffect(() => {
+    fetch(`/api/analytics/curators?months=${curatorMonths}`)
+      .then((r) => r.json().then((b) => ({ ok: r.ok, b })))
+      .then(({ ok, b }) => {
+        if (!ok) throw new Error(b.error);
+        setCurators(b);
+      })
+      .catch((e) => setError(e.message));
+  }, [curatorMonths]);
+
+  useEffect(() => {
+    fetch(`/api/analytics/rating-summary?months=${ratingSummaryMonths}`)
+      .then((r) => r.json().then((b) => ({ ok: r.ok, b })))
+      .then(({ ok, b }) => {
+        if (!ok) throw new Error(b.error);
+        setRatingSummary(b);
+      })
+      .catch((e) => setError(e.message));
+  }, [ratingSummaryMonths]);
 
   if (error) {
     return (
@@ -599,27 +705,27 @@ export default function AnalyticsPage() {
           {!expiring && <p className="px-4 py-6 text-sm text-slate-500">Завантаження…</p>}
           {expiring && !expiring.length && <p className="px-4 py-6 text-sm text-slate-500">Нічого не спливає в обраний період.</p>}
           {expiring && !!expiring.length && (
-            <table className="w-full text-sm">
+            <table className="w-full text-xs">
               <thead>
-                <tr className="border-b border-slate-200 bg-slate-50 text-xs text-slate-500">
-                  <th className="px-4 py-2 text-left font-medium">Працівник</th>
-                  <th className="px-3 py-2 text-left font-medium">Об&rsquo;єкт</th>
-                  <th className="px-3 py-2 text-left font-medium">Компетенція</th>
-                  <th className="px-3 py-2 text-right font-medium">Строк</th>
+                <tr className="border-b border-slate-200 bg-slate-50 text-slate-500">
+                  <th className="px-3 py-1.5 text-left font-medium">Працівник</th>
+                  <th className="px-2 py-1.5 text-left font-medium">Об&rsquo;єкт</th>
+                  <th className="px-2 py-1.5 text-left font-medium">Компетенція</th>
+                  <th className="px-2 py-1.5 text-right font-medium">Строк</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {expiring.map((row, i) => (
                   <tr key={i}>
-                    <td className="px-4 py-2">
+                    <td className="px-3 py-1">
                       <p className="text-slate-900">{row.fullName}</p>
-                      <p className="text-xs text-slate-500">{row.positionTitle}</p>
+                      <p className="text-slate-500">{row.positionTitle}</p>
                     </td>
-                    <td className="px-3 py-2 text-slate-600">{row.objectName}</td>
-                    <td className="px-3 py-2 text-slate-600">{row.competencyName}</td>
-                    <td className="px-3 py-2 text-right">
+                    <td className="px-2 py-1 text-slate-600">{row.objectName}</td>
+                    <td className="px-2 py-1 text-slate-600">{row.competencyName}</td>
+                    <td className="px-2 py-1 text-right">
                       <span
-                        className={`rounded px-1.5 py-0.5 text-xs font-medium ${
+                        className={`rounded px-1.5 py-0.5 font-medium ${
                           row.state === "expired" ? "bg-rose-50 text-rose-700" : "bg-amber-50 text-amber-700"
                         }`}
                       >
@@ -630,6 +736,95 @@ export default function AnalyticsPage() {
                 ))}
               </tbody>
             </table>
+          )}
+        </Section>
+
+        <Section
+          title="Куратори"
+          right={
+            <select
+              value={curatorMonths}
+              onChange={(e) => setCuratorMonths(Number(e.target.value))}
+              className="rounded border border-slate-300 bg-white px-2 py-1 text-xs"
+            >
+              <option value={1}>1 місяць</option>
+              <option value={3}>3 місяці</option>
+              <option value={6}>6 місяців</option>
+              <option value={12}>12 місяців</option>
+            </select>
+          }
+        >
+          {!curators && <p className="px-4 py-6 text-sm text-slate-500">Завантаження…</p>}
+          {curators && !curators.rows.length && <p className="px-4 py-6 text-sm text-slate-500">Кураторів у видимій області немає.</p>}
+          {curators && !!curators.rows.length && (
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-slate-200 bg-slate-50 text-slate-500">
+                  <th className="px-3 py-1.5 text-left font-medium">Куратор</th>
+                  <th className="px-2 py-1.5 text-left font-medium">Об&rsquo;єкт</th>
+                  <th className="px-2 py-1.5 text-right font-medium">Навчає зараз</th>
+                  <th className="px-2 py-1.5 text-right font-medium">Навчив за {curators.months} міс.</th>
+                  <th className="px-2 py-1.5 text-center font-medium">Наставник</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {curators.rows.map((r) => (
+                  <tr key={r.curatorEmploymentId}>
+                    <td className="px-3 py-1 text-slate-900">{r.curatorName}</td>
+                    <td className="px-2 py-1 text-slate-600">{r.objectName}</td>
+                    <td className="px-2 py-1 text-right tabular-nums text-slate-700">{r.currentlyTraining}</td>
+                    <td className="px-2 py-1 text-right tabular-nums text-slate-700">{r.graduatedInPeriod}</td>
+                    <td className="px-2 py-1 text-center">{r.hasMentorBadge && <span title="Бейдж «Наставник»">🏅</span>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </Section>
+
+        <Section
+          title="Рейтинг і нагороди"
+          right={
+            <select
+              value={ratingSummaryMonths}
+              onChange={(e) => setRatingSummaryMonths(Number(e.target.value))}
+              className="rounded border border-slate-300 bg-white px-2 py-1 text-xs"
+            >
+              <option value={1}>1 місяць</option>
+              <option value={3}>3 місяці</option>
+              <option value={6}>6 місяців</option>
+              <option value={12}>12 місяців</option>
+            </select>
+          }
+        >
+          {!ratingSummary && <p className="px-4 py-6 text-sm text-slate-500">Завантаження…</p>}
+          {ratingSummary && !ratingSummary.byObject.length && !ratingSummary.byCluster.length && (
+            <p className="px-4 py-6 text-sm text-slate-500">За обраний період оцінок не було.</p>
+          )}
+          {ratingSummary && (!!ratingSummary.byObject.length || !!ratingSummary.byCluster.length) && (
+            <div className="px-4 py-3 space-y-4">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div>
+                  <p className="mb-1 text-xs font-medium text-slate-500">По кластерах</p>
+                  <RatingSummaryTable rows={ratingSummary.byCluster} />
+                </div>
+                <div>
+                  <p className="mb-1 text-xs font-medium text-slate-500">По об&rsquo;єктах</p>
+                  <RatingSummaryTable rows={ratingSummary.byObject} />
+                </div>
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div>
+                  <p className="mb-1 text-xs font-medium text-slate-500">Топ за балом</p>
+                  <RatingSummaryPersonTable rows={ratingSummary.topPositive} positive />
+                </div>
+                <div>
+                  <p className="mb-1 text-xs font-medium text-slate-500">Найнижчий бал</p>
+                  <RatingSummaryPersonTable rows={ratingSummary.topNegative} positive={false} />
+                </div>
+              </div>
+            </div>
           )}
         </Section>
       </div>

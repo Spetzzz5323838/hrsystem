@@ -1135,8 +1135,11 @@ async function seedTerminationReasons() {
 
 // Чек-ліст звільнення — docs/hr-system-catalogs-v1.1.md §8.1, 16 пунктів.
 // Пункт 7 (ТМЦ) — умовний, підключається лише для МВО-профілів (lib/termination.ts).
-// Пункт 10 навмисно завжди неблокуючий — спрощення відносно "блокує для
-// рівня ≥ 20" (блокування прив'язане до шаблону, не до інстансу).
+// Пункти 9/10 — блокуючі для ВСІХ (правки 20.09.2026, п.12; рішення
+// узгоджено з користувачем 2026-09-22, див. project_decisions) — свідома
+// відмова від докс-умови "блокує лише для рівня ≥ 20" на користь простішого
+// правила. Це друга версія шаблону (v2 нижче в seedOffboardingTemplate) —
+// v1 лишається як була, щоб не зачепити вже запущені звільнення.
 const terminationChecklistItems: ChecklistItemSeed[] = [
   { order: 1, title: "Ініціація: причина, останній робочий день", responsibleRole: Role.STORE_ADMIN, actionType: ActionType.INPUT_VALUE, isBlocking: true, slaHours: 0, module: null },
   { order: 2, title: "Заява на звільнення прийнята", responsibleRole: Role.ACCOUNTANT, actionType: ActionType.UPLOAD, isBlocking: true, slaHours: 24, module: null },
@@ -1146,8 +1149,8 @@ const terminationChecklistItems: ChecklistItemSeed[] = [
   { order: 6, title: "Квитування закріпленого обладнання", responsibleRole: Role.AUDITOR, actionType: ActionType.MARK, isBlocking: true, slaHours: 48, module: null },
   { order: 7, title: "Інвентаризація та передача ТМЦ", responsibleRole: Role.AUDITOR, actionType: ActionType.MARK, isBlocking: true, slaHours: 72, module: null },
   { order: 8, title: "Повернення бейджа, ключів, спецодягу, форми", responsibleRole: Role.STORE_ADMIN, actionType: ActionType.MARK, isBlocking: true, slaHours: 24, module: null },
-  { order: 9, title: "Повернення техніки", responsibleRole: Role.STORE_ADMIN, actionType: ActionType.MARK, isBlocking: false, slaHours: 24, module: null },
-  { order: 10, title: "Передача справ наступнику або куратору", responsibleRole: Role.STORE_ADMIN, actionType: ActionType.MARK, isBlocking: false, slaHours: 48, module: null },
+  { order: 9, title: "Повернення техніки", responsibleRole: Role.STORE_ADMIN, actionType: ActionType.MARK, isBlocking: true, slaHours: 24, module: null },
+  { order: 10, title: "Передача справ наступнику або куратору", responsibleRole: Role.STORE_ADMIN, actionType: ActionType.MARK, isBlocking: true, slaHours: 48, module: null },
   { order: 11, title: "Відмітка про наявність/відсутність претензій", responsibleRole: Role.AUDITOR, actionType: ActionType.APPROVAL, isBlocking: true, slaHours: 0, module: null },
   { order: 12, title: "Погодження звільнення", responsibleRole: Role.COO, actionType: ActionType.APPROVAL, isBlocking: true, slaHours: 24, module: null },
   { order: 13, title: "Оформлення звільнення", responsibleRole: Role.ACCOUNTANT, actionType: ActionType.MARK, isBlocking: true, slaHours: 0, module: null },
@@ -1157,19 +1160,44 @@ const terminationChecklistItems: ChecklistItemSeed[] = [
 ];
 
 async function seedOffboardingTemplate() {
-  const existing = await prisma.processTemplate.findUnique({
+  const v1 = await prisma.processTemplate.findUnique({
     where: { code_version: { code: "OFFBOARDING_BASE", version: 1 } },
   });
-  if (existing) return;
 
-  const template = await prisma.processTemplate.create({
-    data: { code: "OFFBOARDING_BASE", version: 1, type: ProcessType.OFFBOARDING, name: "Звільнення — базовий чек-ліст" },
+  if (!v1) {
+    // Свіжа база — одразу створюємо v1 з фінальними (вже виправленими)
+    // значеннями isBlocking, версія 2 тут не потрібна.
+    const template = await prisma.processTemplate.create({
+      data: { code: "OFFBOARDING_BASE", version: 1, type: ProcessType.OFFBOARDING, name: "Звільнення — базовий чек-ліст" },
+    });
+    await createOffboardingItems(template.id);
+    return;
+  }
+
+  // v1 уже існує (стара база, ще зі старими isBlocking) — версіонування
+  // замість редагування рядків v1 (архітектурне рішення №6 з CLAUDE.md:
+  // "редагування шаблона створює нову версію й не ламає активні процеси").
+  // isBlocking читається наживо з ChecklistItemTemplate, тож правка рядків
+  // v1 одразу вплинула б і на вже запущені звільнення.
+  const v2 = await prisma.processTemplate.findUnique({
+    where: { code_version: { code: "OFFBOARDING_BASE", version: 2 } },
   });
+  if (v2) return;
 
+  if (v1.isActive) {
+    await prisma.processTemplate.update({ where: { id: v1.id }, data: { isActive: false } });
+  }
+  const template2 = await prisma.processTemplate.create({
+    data: { code: "OFFBOARDING_BASE", version: 2, type: ProcessType.OFFBOARDING, name: "Звільнення — базовий чек-ліст" },
+  });
+  await createOffboardingItems(template2.id);
+}
+
+async function createOffboardingItems(templateId: number) {
   for (const item of terminationChecklistItems) {
     await prisma.checklistItemTemplate.create({
       data: {
-        templateId: template.id,
+        templateId,
         order: item.order,
         title: item.title,
         responsibleRole: item.responsibleRole,
