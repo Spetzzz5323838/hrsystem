@@ -759,10 +759,17 @@ function ProfileFieldsDialog({
   );
 }
 
-type AttestationFormItem = { id: number; order: number; title: string; maxPoints: number };
-type AttestationFormSection = { id: number; order: number; title: string; items: AttestationFormItem[] };
-type AttestationForm = { templateId: number; passThresholdPercent: number; maxScore: number; sections: AttestationFormSection[] };
+type AttestationFormRow = { competencyId: number; code: string; name: string; isRequired: boolean };
+type AttestationForm = { positionProfileId: number; rows: AttestationFormRow[] };
 
+const SCORE_LABELS: Record<number, string> = { 0: "Не здав", 1: "Треба попрацювати", 2: "Молодець" };
+
+/**
+ * Табель по компетенціях (тема "посада — компетенції — атестація",
+ * 2026-09-25) — заміна старої форми з розділами/балами. Один рядок на
+ * компетенцію посади, бал 0/1/2; 1 і 2 зараховують компетенцію. Допуск —
+ * коли зараховані всі обов'язкові, рекомендовані лише інформативні.
+ */
 function AttestationDialog({
   taskId,
   onClose,
@@ -777,7 +784,7 @@ function AttestationDialog({
   const [scores, setScores] = useState<Record<number, number>>({});
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [result, setResult] = useState<{ passed: boolean; percent: number } | null>(null);
+  const [result, setResult] = useState<{ passed: boolean; missingRequired: string[] } | null>(null);
 
   useEffect(() => {
     fetch(`/api/tasks/${taskId}/attestation-form`)
@@ -786,15 +793,11 @@ function AttestationDialog({
         if (!ok) throw new Error(body.error ?? "Не вдалося завантажити форму");
         setForm(body);
         const initial: Record<number, number> = {};
-        for (const s of body.sections as AttestationFormSection[]) {
-          for (const i of s.items) initial[i.id] = 0;
-        }
+        for (const row of body.rows as AttestationFormRow[]) initial[row.competencyId] = 0;
         setScores(initial);
       })
       .catch((e) => setLoadError(e.message));
   }, [taskId]);
-
-  const total = Object.values(scores).reduce((sum, v) => sum + v, 0);
 
   const submit = () => {
     if (!form) return;
@@ -803,17 +806,40 @@ function AttestationDialog({
     fetch(`/api/tasks/${taskId}/attestation`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ scores: Object.entries(scores).map(([itemId, score]) => ({ itemId: Number(itemId), score })) }),
+      body: JSON.stringify({ scores: Object.entries(scores).map(([competencyId, score]) => ({ competencyId: Number(competencyId), score })) }),
     })
       .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
       .then(({ ok, body }) => {
         if (!ok) throw new Error(body.error ?? "Не вдалося зберегти атестацію");
-        setResult({ passed: body.passed, percent: body.percent });
+        setResult({ passed: body.passed, missingRequired: body.missingRequired ?? [] });
         onSubmitted();
       })
       .catch((e) => setSubmitError(e.message))
       .finally(() => setSubmitting(false));
   };
+
+  const required = form?.rows.filter((r) => r.isRequired) ?? [];
+  const recommended = form?.rows.filter((r) => !r.isRequired) ?? [];
+
+  const ScoreRow = ({ row }: { row: AttestationFormRow }) => (
+    <div className="flex items-center justify-between gap-3 py-1">
+      <span className="text-sm text-slate-700">{row.name}</span>
+      <div className="flex gap-1">
+        {[0, 1, 2].map((v) => (
+          <button
+            key={v}
+            title={SCORE_LABELS[v]}
+            onClick={() => setScores((prev) => ({ ...prev, [row.competencyId]: v }))}
+            className={`h-7 w-7 rounded text-xs font-medium ${
+              (scores[row.competencyId] ?? 0) === v ? "bg-slate-800 text-white" : "border border-slate-300 text-slate-500 hover:bg-slate-50"
+            }`}
+          >
+            {v}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
 
   return (
     <div className="fixed inset-0 z-20 flex items-center justify-center bg-slate-900/40 px-4">
@@ -830,9 +856,13 @@ function AttestationDialog({
         {result ? (
           <div className="mt-4 space-y-2">
             <p className={`text-lg font-semibold ${result.passed ? "text-emerald-700" : "text-rose-700"}`}>
-              {result.passed ? "Складено" : "Не складено"} — {result.percent}%
+              {result.passed ? "Складено" : "Не складено"}
             </p>
-            {!result.passed && <p className="text-sm text-slate-600">Пункт лишився невиконаним — можна перескладати пізніше.</p>}
+            {!result.passed && (
+              <p className="text-sm text-slate-600">
+                Не зараховано: {result.missingRequired.join(", ")}. Пункт лишився невиконаним — можна перескладати пізніше.
+              </p>
+            )}
             <button onClick={onClose} className="mt-2 rounded bg-slate-900 px-3 py-1.5 text-sm font-medium text-white">
               Закрити
             </button>
@@ -840,39 +870,32 @@ function AttestationDialog({
         ) : (
           form && (
             <div className="mt-4 space-y-4">
-              <p className="text-sm text-slate-500">Прохідний бал: {form.passThresholdPercent}% від {form.maxScore}</p>
-              {form.sections.map((section) => (
-                <div key={section.id}>
-                  <h4 className="mb-1.5 text-sm font-semibold text-slate-800">{section.title}</h4>
-                  <div className="space-y-1.5">
-                    {section.items.map((item) => (
-                      <div key={item.id} className="flex items-center justify-between gap-3">
-                        <span className="text-sm text-slate-700">{item.title}</span>
-                        <input
-                          type="number"
-                          min={0}
-                          max={item.maxPoints}
-                          value={scores[item.id] ?? 0}
-                          onChange={(e) =>
-                            setScores((prev) => ({ ...prev, [item.id]: Math.max(0, Math.min(item.maxPoints, Number(e.target.value))) }))
-                          }
-                          className="w-16 rounded border border-slate-300 px-2 py-1 text-right text-sm"
-                        />
-                      </div>
+              <p className="text-xs text-slate-400">Бал 0/1/2 на кожну компетенцію — 1 і 2 зараховують її. Сам іспит/перевірка йде поза системою.</p>
+
+              <div>
+                <h4 className="mb-1 text-sm font-semibold text-slate-800">Обов&rsquo;язкові</h4>
+                <div className="divide-y divide-slate-50">
+                  {required.map((row) => (
+                    <ScoreRow key={row.competencyId} row={row} />
+                  ))}
+                  {!required.length && <p className="text-sm text-slate-400">Немає обов&rsquo;язкових компетенцій.</p>}
+                </div>
+              </div>
+
+              {!!recommended.length && (
+                <div>
+                  <h4 className="mb-1 text-sm font-semibold text-slate-500">Рекомендовані (не блокують допуск)</h4>
+                  <div className="divide-y divide-slate-50">
+                    {recommended.map((row) => (
+                      <ScoreRow key={row.competencyId} row={row} />
                     ))}
                   </div>
                 </div>
-              ))}
-
-              <div className="flex items-center justify-between border-t border-slate-200 pt-3">
-                <span className="text-sm font-medium text-slate-700">
-                  Разом: {total} / {form.maxScore} ({Math.round((total / form.maxScore) * 100)}%)
-                </span>
-              </div>
+              )}
 
               {submitError && <p className="text-sm text-rose-700">{submitError}</p>}
 
-              <div className="flex justify-end gap-2">
+              <div className="flex justify-end gap-2 border-t border-slate-200 pt-3">
                 <button onClick={onClose} className="rounded border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-50">
                   Скасувати
                 </button>

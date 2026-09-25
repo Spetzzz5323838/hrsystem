@@ -50,6 +50,7 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
       validMonths: pc.competency.validMonths,
       resetOnBreakMonths: pc.competency.resetOnBreakMonths,
       materials: pc.competency.materials,
+      isRequired: pc.isRequired,
     })),
   });
 }

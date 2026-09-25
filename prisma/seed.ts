@@ -860,179 +860,6 @@ async function createOnboardingItems(templateId: number) {
   }
 }
 
-// Конструктор чек-листа атестації — docs catalogs-v1.1.md §7. Приклади
-// касира й пекаря взяті дослівно з §7.1/§7.2, разом з розбивкою по балах;
-// maxPoints зазвичай 2 ("0/1/2"), крім розділу "Практика", де сума
-// розділу з докс не ділиться порівну на 2 бали за пункт.
-type AttestationItemSeed = { title: string; maxPoints: number };
-type AttestationSectionSeed = { title: string; items: AttestationItemSeed[] };
-type AttestationTemplateSeed = { positionTitle: string; passThresholdPercent: number; sections: AttestationSectionSeed[] };
-
-const attestationTemplates: AttestationTemplateSeed[] = [
-  {
-    positionTitle: "Касир",
-    passThresholdPercent: 80,
-    sections: [
-      {
-        title: "Компанія",
-        items: [
-          { title: "Історія та цінності", maxPoints: 2 },
-          { title: "Структура магазину", maxPoints: 2 },
-          { title: "Кому підпорядковується", maxPoints: 2 },
-          { title: "Графік і правила внутрішнього розпорядку", maxPoints: 2 },
-        ],
-      },
-      {
-        title: "Каса й ПРРО",
-        items: [
-          { title: "Відкриття та закриття зміни", maxPoints: 2 },
-          { title: "Пробиття чека", maxPoints: 2 },
-          { title: "Повернення", maxPoints: 2 },
-          { title: "Скасування позиції", maxPoints: 2 },
-          { title: "Оплата карткою", maxPoints: 2 },
-          { title: "Дії при збої", maxPoints: 2 },
-          { title: "Інкасація", maxPoints: 2 },
-        ],
-      },
-      {
-        title: "Товар",
-        items: [
-          { title: "Пошук за штрихкодом і кодом", maxPoints: 2 },
-          { title: "Ваговий товар", maxPoints: 2 },
-          { title: "Перевірка терміну придатності", maxPoints: 2 },
-          { title: "Дії при розбіжності ціни", maxPoints: 2 },
-        ],
-      },
-      {
-        title: "Обслуговування",
-        items: [
-          { title: "Привітання і прощання", maxPoints: 2 },
-          { title: "Робота з конфліктом", maxPoints: 2 },
-          { title: "Робота з чергою", maxPoints: 2 },
-          { title: "Продаж супутнього товару", maxPoints: 2 },
-        ],
-      },
-      {
-        title: "Санітарія",
-        items: [
-          { title: "Особиста гігієна", maxPoints: 2 },
-          { title: "Санітарний одяг", maxPoints: 2 },
-          { title: "Прибирання робочої зони", maxPoints: 2 },
-        ],
-      },
-      {
-        title: "ОП і ПБ",
-        items: [
-          { title: "Дії при пожежі", maxPoints: 2 },
-          { title: "Розташування вогнегасника й виходів", maxPoints: 2 },
-          { title: "Дії при травмі", maxPoints: 2 },
-        ],
-      },
-      {
-        title: "Практика",
-        items: [
-          { title: "Обслуговування 5 клієнтів під наглядом", maxPoints: 4 },
-          { title: "Самостійне закриття зміни", maxPoints: 4 },
-        ],
-      },
-    ],
-  },
-  {
-    positionTitle: "Пекар",
-    passThresholdPercent: 80,
-    sections: [
-      {
-        title: "Компанія",
-        items: [
-          { title: "Цінності", maxPoints: 2 },
-          { title: "Структура цеху", maxPoints: 2 },
-          { title: "Підпорядкування", maxPoints: 2 },
-          { title: "Змінний графік", maxPoints: 2 },
-        ],
-      },
-      {
-        title: "Рецептури й процес",
-        items: [
-          { title: "Читання технологічної карти", maxPoints: 2 },
-          { title: "Порядок замісу", maxPoints: 2 },
-          { title: "Розстойка", maxPoints: 2 },
-          { title: "Випікання", maxPoints: 2 },
-          { title: "Контроль ваги й виходу", maxPoints: 2 },
-        ],
-      },
-      {
-        title: "Обладнання",
-        items: [
-          { title: "Тістоміс", maxPoints: 2 },
-          { title: "Піч", maxPoints: 2 },
-          { title: "Розстійна шафа", maxPoints: 2 },
-          { title: "Порядок увімкнення і зупинки", maxPoints: 2 },
-          { title: "Дії при збої", maxPoints: 2 },
-        ],
-      },
-      {
-        title: "Санітарія і HACCP",
-        items: [
-          { title: "Особиста гігієна", maxPoints: 2 },
-          { title: "Санітарний одяг", maxPoints: 2 },
-          { title: "Миття й дезінфекція", maxPoints: 2 },
-          { title: "Контроль температур", maxPoints: 2 },
-          { title: "Ведення журналів", maxPoints: 2 },
-        ],
-      },
-      {
-        title: "Сировина",
-        items: [
-          { title: "Приймання", maxPoints: 2 },
-          { title: "Умови зберігання", maxPoints: 2 },
-          { title: "Контроль термінів", maxPoints: 2 },
-          { title: "Дії при невідповідності", maxPoints: 2 },
-        ],
-      },
-      {
-        title: "ОП і ПБ",
-        items: [
-          { title: "Робота з гарячим обладнанням", maxPoints: 2 },
-          { title: "Дії при опіку", maxPoints: 2 },
-          { title: "Дії при пожежі", maxPoints: 2 },
-          { title: "Виходи й вогнегасники", maxPoints: 2 },
-        ],
-      },
-      {
-        title: "Практика",
-        items: [{ title: "Самостійне виготовлення партії під наглядом", maxPoints: 6 }],
-      },
-    ],
-  },
-];
-
-async function seedAttestationTemplates() {
-  for (const t of attestationTemplates) {
-    const position = await prisma.positionProfile.findUnique({ where: { title: t.positionTitle } });
-    if (!position) continue;
-
-    // Ідемпотентно: якщо шаблон уже є (могли відредагувати вручну через
-    // конструктор), не перезаписуємо.
-    const existing = await prisma.attestationTemplate.findUnique({ where: { positionProfileId: position.id } });
-    if (existing) continue;
-
-    const template = await prisma.attestationTemplate.create({
-      data: { positionProfileId: position.id, passThresholdPercent: t.passThresholdPercent },
-    });
-
-    for (const [sectionIndex, section] of t.sections.entries()) {
-      const createdSection = await prisma.attestationSection.create({
-        data: { templateId: template.id, order: sectionIndex + 1, title: section.title },
-      });
-      for (const [itemIndex, item] of section.items.entries()) {
-        await prisma.attestationItem.create({
-          data: { sectionId: createdSection.id, order: itemIndex + 1, title: item.title, maxPoints: item.maxPoints },
-        });
-      }
-    }
-  }
-}
-
 // Довідник приводів позитив/негатив — docs/hr-rating-visibility-v1.3.md §2.1.
 type RatingCategorySeed = { code: string; name: string; side: RatingSide; defaultPoints: number };
 
@@ -1422,12 +1249,12 @@ const notificationTemplates: { key: string; description: string; text: string }[
   {
     key: "attestation.failedCurator",
     description: "Куратору — атестація підопічного не складена",
-    text: "Атестація {{fullName}} не складена (спроба {{attemptNumber}}, {{percent}}% при потрібних {{threshold}}%).\n\n{{sections}}",
+    text: "Атестація {{fullName}} не складена (спроба {{attemptNumber}}).\n\nНе зараховано: {{missing}}.",
   },
   {
     key: "attestation.thirdFailEscalation",
     description: "Директору кластера — третій провал атестації поспіль",
-    text: "{{fullName}} провалив(-ла) атестацію втретє ({{percent}}%). Потрібне рішення.",
+    text: "{{fullName}} провалив(-ла) атестацію втретє. Не зараховано: {{missing}}. Потрібне рішення.",
   },
   {
     key: "bot.newHireRequest",
@@ -1499,9 +1326,6 @@ async function main() {
 
   console.log("Шаблон онбордингу...");
   await seedOnboardingTemplate();
-
-  console.log("Конструктор атестації (приклади касира й пекаря)...");
-  await seedAttestationTemplates();
 
   console.log("Довідник приводів рейтингу...");
   await seedRatingCategories();

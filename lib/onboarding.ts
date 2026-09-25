@@ -315,9 +315,9 @@ export async function getInstanceTasks(instanceId: number): Promise<TaskView[]> 
   if (hasAttestationTask) {
     const instance = await prisma.processInstance.findUnique({
       where: { id: instanceId },
-      select: { employment: { select: { staffUnit: { select: { positionProfile: { select: { attestationTemplate: { select: { id: true } } } } } } } } },
+      select: { employment: { select: { staffUnit: { select: { positionProfile: { select: { _count: { select: { positionCompetencies: true } } } } } } } } },
     });
-    attestationConfigured = !!instance?.employment.staffUnit.positionProfile.attestationTemplate;
+    attestationConfigured = !!instance && instance.employment.staffUnit.positionProfile._count.positionCompetencies > 0;
   }
 
   return tasks.map((t, i) => {
@@ -365,7 +365,7 @@ export async function getInstanceTasks(instanceId: number): Promise<TaskView[]> 
 export async function completeTask(
   taskId: number,
   completedByEmploymentId: number,
-  input?: { score?: number },
+  input?: { score?: number; skipCompetencyAutoClose?: boolean },
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const task = await prisma.task.findUnique({
     where: { id: taskId },
@@ -515,18 +515,26 @@ export async function completeTask(
   }
 
   if (task.itemTemplate.title.startsWith("Атестація")) {
-    const delta = await getCompetencyDelta(employment.personId, employment.staffUnit.positionProfileId);
-    for (const row of delta) {
-      if (row.state === "valid") continue;
-      await prisma.competencyRecord.create({
-        data: {
-          personId: employment.personId,
-          competencyId: row.competencyId,
-          passedAt: now,
-          validUntil: row.validMonths ? addMonths(now, row.validMonths) : null,
-          source: CompetencySource.ATTESTATION,
-        },
-      });
+    // Табель по компетенціях (submitAttestation, lib/attestation.ts) уже
+    // записав реальні бали за обов'язковими й рекомендованими компетенціями
+    // й викликає completeTask із skipCompetencyAutoClose — інакше цей
+    // блок автоматично "зарахував" би рекомендовані компетенції, які
+    // навмисно отримали 0 на атестації. Для позиції БЕЗ жодної компетенції
+    // (проста кнопка, без табеля) delta порожня — блок безпечно нічого не робить.
+    if (!input?.skipCompetencyAutoClose) {
+      const delta = await getCompetencyDelta(employment.personId, employment.staffUnit.positionProfileId);
+      for (const row of delta) {
+        if (row.state === "valid") continue;
+        await prisma.competencyRecord.create({
+          data: {
+            personId: employment.personId,
+            competencyId: row.competencyId,
+            passedAt: now,
+            validUntil: row.validMonths ? addMonths(now, row.validMonths) : null,
+            source: CompetencySource.ATTESTATION,
+          },
+        });
+      }
     }
 
     await checkProfileClosedBadge(employment.personId);

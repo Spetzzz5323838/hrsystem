@@ -33,6 +33,7 @@ type ProfileDetail = ProfileListItem & {
     validMonths: number | null;
     resetOnBreakMonths: number | null;
     materials: { id: number; title: string }[];
+    isRequired: boolean;
   }[];
 };
 
@@ -56,10 +57,6 @@ type MaterialRow = {
   durationMin: number | null;
   sendViaBot: boolean;
 };
-
-type AttestationItemRow = { id: number; order: number; title: string; maxPoints: number };
-type AttestationSectionRow = { id: number; order: number; title: string; items: AttestationItemRow[] };
-type AttestationForm = { templateId: number; passThresholdPercent: number; maxScore: number; sections: AttestationSectionRow[] };
 
 // Дзеркалить lib/review.ts::REVIEW_CRITERION_LABELS — той файл тягне за
 // собою Prisma-клієнт, тому дублюємо тут, а не імпортуємо в клієнтський компонент.
@@ -195,20 +192,6 @@ export default function CatalogPage() {
     updatePosition({ extraModules: [...current] });
   };
 
-  const [attestationForm, setAttestationForm] = useState<AttestationForm | null>(null);
-  const [attestationLoaded, setAttestationLoaded] = useState(false);
-
-  const loadAttestationForm = () => {
-    if (selectedId == null) return;
-    fetch(`/api/position-profiles/${selectedId}/attestation-template`)
-      .then((r) => (r.ok ? r.json() : { form: null }))
-      .then((body) => {
-        setAttestationForm(body.form);
-        setAttestationLoaded(true);
-      })
-      .catch(() => setAttestationLoaded(true));
-  };
-
   const [reviewWeights, setReviewWeights] = useState<{ criterion: string; weight: number }[] | null>(null);
   const [reviewWeightsError, setReviewWeightsError] = useState<string | null>(null);
 
@@ -240,9 +223,6 @@ export default function CatalogPage() {
   useEffect(() => {
     setDetail(null);
     loadDetail();
-    setAttestationForm(null);
-    setAttestationLoaded(false);
-    loadAttestationForm();
     setReviewWeights(null);
     loadReviewWeights();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -490,137 +470,20 @@ export default function CatalogPage() {
       .catch((e) => setError(e.message));
   };
 
-  // ── Конструктор атестації (docs catalogs-v1.1 §7) ──
-  const [attestationError, setAttestationError] = useState<string | null>(null);
-  const [newThreshold, setNewThreshold] = useState("80");
-  const [newSectionTitle, setNewSectionTitle] = useState("");
-  const [newItemBySection, setNewItemBySection] = useState<Record<number, { title: string; maxPoints: string }>>({});
-
-  const createAttestationForm = () => {
+  /** Обов'язкова/рекомендована — визначає, що входить у поріг допуску на атестації (lib/attestation.ts). */
+  const toggleCompetencyRequired = (competencyId: number, isRequired: boolean) => {
     if (!selectedId) return;
-    fetch(`/api/position-profiles/${selectedId}/attestation-template`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ passThresholdPercent: Number(newThreshold) }),
-    })
-      .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
-      .then(({ ok, body }) => {
-        if (!ok) throw new Error(body.error ?? "Не вдалося створити форму");
-        setAttestationError(null);
-        loadAttestationForm();
-      })
-      .catch((e) => setAttestationError(e.message));
-  };
-
-  const updateThreshold = (value: string) => {
-    if (!selectedId) return;
-    fetch(`/api/position-profiles/${selectedId}/attestation-template`, {
+    fetch(`/api/position-profiles/${selectedId}/competencies/${competencyId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ passThresholdPercent: Number(value) }),
+      body: JSON.stringify({ isRequired }),
     })
       .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
       .then(({ ok, body }) => {
-        if (!ok) throw new Error(body.error ?? "Не вдалося зберегти прохідний бал");
-        loadAttestationForm();
+        if (!ok) throw new Error(body.error ?? "Не вдалося зберегти");
+        loadDetail();
       })
-      .catch((e) => setAttestationError(e.message));
-  };
-
-  const deleteAttestationForm = () => {
-    if (!selectedId) return;
-    if (!confirm("Видалити всю форму атестації для цієї посади (з розділами й пунктами)?")) return;
-    fetch(`/api/position-profiles/${selectedId}/attestation-template`, { method: "DELETE" })
-      .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
-      .then(({ ok, body }) => {
-        if (!ok) throw new Error(body.error ?? "Не вдалося видалити форму");
-        loadAttestationForm();
-      })
-      .catch((e) => setAttestationError(e.message));
-  };
-
-  const addSection = () => {
-    if (!selectedId || !newSectionTitle.trim()) return;
-    fetch(`/api/position-profiles/${selectedId}/attestation-template/sections`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title: newSectionTitle.trim() }),
-    })
-      .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
-      .then(({ ok, body }) => {
-        if (!ok) throw new Error(body.error ?? "Не вдалося додати розділ");
-        setNewSectionTitle("");
-        loadAttestationForm();
-      })
-      .catch((e) => setAttestationError(e.message));
-  };
-
-  const renameSection = (sectionId: number, title: string) => {
-    if (!title.trim()) return;
-    fetch(`/api/attestation-sections/${sectionId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title: title.trim() }),
-    })
-      .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
-      .then(({ ok, body }) => {
-        if (!ok) throw new Error(body.error ?? "Не вдалося перейменувати розділ");
-        loadAttestationForm();
-      })
-      .catch((e) => setAttestationError(e.message));
-  };
-
-  const renameItem = (itemId: number, title: string) => {
-    if (!title.trim()) return;
-    fetch(`/api/attestation-items/${itemId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title: title.trim() }),
-    })
-      .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
-      .then(({ ok, body }) => {
-        if (!ok) throw new Error(body.error ?? "Не вдалося перейменувати пункт");
-        loadAttestationForm();
-      })
-      .catch((e) => setAttestationError(e.message));
-  };
-
-  const deleteSection = (sectionId: number) => {
-    if (!confirm("Видалити розділ і всі його пункти?")) return;
-    fetch(`/api/attestation-sections/${sectionId}`, { method: "DELETE" })
-      .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
-      .then(({ ok, body }) => {
-        if (!ok) throw new Error(body.error ?? "Не вдалося видалити розділ");
-        loadAttestationForm();
-      })
-      .catch((e) => setAttestationError(e.message));
-  };
-
-  const addItem = (sectionId: number) => {
-    const draft = newItemBySection[sectionId];
-    if (!draft?.title.trim()) return;
-    fetch(`/api/attestation-sections/${sectionId}/items`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title: draft.title.trim(), maxPoints: Number(draft.maxPoints || "2") }),
-    })
-      .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
-      .then(({ ok, body }) => {
-        if (!ok) throw new Error(body.error ?? "Не вдалося додати пункт");
-        setNewItemBySection((prev) => ({ ...prev, [sectionId]: { title: "", maxPoints: "2" } }));
-        loadAttestationForm();
-      })
-      .catch((e) => setAttestationError(e.message));
-  };
-
-  const deleteItem = (itemId: number) => {
-    fetch(`/api/attestation-items/${itemId}`, { method: "DELETE" })
-      .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
-      .then(({ ok, body }) => {
-        if (!ok) throw new Error(body.error ?? "Не вдалося видалити пункт");
-        loadAttestationForm();
-      })
-      .catch((e) => setAttestationError(e.message));
+      .catch((e) => setError(e.message));
   };
 
   if (error) {
@@ -887,6 +750,7 @@ export default function CatalogPage() {
                           <th className="px-4 py-2 font-medium">Строк дії</th>
                           <th className="px-4 py-2 font-medium">Обнулення при перерві</th>
                           <th className="px-4 py-2 font-medium text-right">Матеріали</th>
+                          <th className="px-4 py-2 font-medium text-center">Обов&rsquo;язкова</th>
                           {canEdit && <th className="px-4 py-2" />}
                         </tr>
                       </thead>
@@ -899,6 +763,18 @@ export default function CatalogPage() {
                             <td className="px-4 py-2 text-right text-slate-500">
                               {c.materials.length ? `${c.materials.length} матеріал(и)` : "—"}
                             </td>
+                            <td className="px-4 py-2 text-center">
+                              {canEdit ? (
+                                <input
+                                  type="checkbox"
+                                  checked={c.isRequired}
+                                  onChange={(e) => toggleCompetencyRequired(c.id, e.target.checked)}
+                                  className="h-4 w-4"
+                                />
+                              ) : (
+                                <span>{c.isRequired ? "так" : "рекомендована"}</span>
+                              )}
+                            </td>
                             {canEdit && (
                               <td className="px-4 py-2 text-right">
                                 <button onClick={() => detachCompetency(c.id)} className="text-xs text-rose-600 hover:text-rose-800">
@@ -910,13 +786,16 @@ export default function CatalogPage() {
                         ))}
                         {!detail.competencies.length && (
                           <tr>
-                            <td colSpan={canEdit ? 5 : 4} className="px-4 py-8 text-center text-sm text-slate-500">
+                            <td colSpan={canEdit ? 6 : 5} className="px-4 py-8 text-center text-sm text-slate-500">
                               У цього профілю ще немає компетенцій у довіднику.
                             </td>
                           </tr>
                         )}
                       </tbody>
                     </table>
+                    <p className="border-t border-slate-200 px-4 py-2 text-xs text-slate-500">
+                      Обов&rsquo;язкові компетенції блокують допуск до роботи на атестації; рекомендовані оцінюються, але не блокують.
+                    </p>
                     {canEdit && (
                       <div className="flex flex-wrap items-center gap-2 border-t border-slate-200 px-4 py-3">
                         <select
@@ -941,150 +820,6 @@ export default function CatalogPage() {
                           Додати
                         </button>
                         {attachError && <span className="text-sm text-rose-700">{attachError}</span>}
-                      </div>
-                    )}
-                  </Section>
-
-                  <Section
-                    title="Атестація"
-                    right={attestationForm ? <span className="text-sm text-slate-500">прохідний {attestationForm.passThresholdPercent}%</span> : null}
-                  >
-                    {!attestationLoaded && <p className="px-4 py-3 text-sm text-slate-500">Завантаження…</p>}
-                    {attestationError && <p className="px-4 py-2 text-sm text-rose-700">{attestationError}</p>}
-                    {attestationLoaded && !attestationForm && (
-                      <div className="px-4 py-3">
-                        {canEditTemplates ? (
-                          <div className="flex items-center gap-2">
-                            <span className="text-sm text-slate-600">Форми ще немає. Прохідний бал:</span>
-                            <input
-                              type="number"
-                              min={1}
-                              max={100}
-                              value={newThreshold}
-                              onChange={(e) => setNewThreshold(e.target.value)}
-                              className="w-20 rounded border border-slate-300 px-2 py-1 text-sm"
-                            />
-                            <span className="text-sm text-slate-600">%</span>
-                            <button onClick={createAttestationForm} className="rounded bg-slate-900 px-3 py-1.5 text-sm font-medium text-white">
-                              Створити форму
-                            </button>
-                          </div>
-                        ) : (
-                          <p className="text-sm text-slate-500">
-                            Для цієї посади ще не налаштовано форму атестації — атестація приймається простим позначенням "виконано".
-                          </p>
-                        )}
-                      </div>
-                    )}
-                    {attestationLoaded && attestationForm && (
-                      <div className="space-y-3 px-4 py-3">
-                        {canEditTemplates && (
-                          <div className="flex items-center gap-2">
-                            <span className="text-sm text-slate-600">Прохідний бал:</span>
-                            <input
-                              type="number"
-                              min={1}
-                              max={100}
-                              defaultValue={attestationForm.passThresholdPercent}
-                              onBlur={(e) => updateThreshold(e.target.value)}
-                              className="w-20 rounded border border-slate-300 px-2 py-1 text-sm"
-                            />
-                            <span className="text-sm text-slate-600">% від {attestationForm.maxScore}</span>
-                            <button onClick={deleteAttestationForm} className="ml-auto text-xs text-rose-600 hover:text-rose-800">
-                              видалити всю форму
-                            </button>
-                          </div>
-                        )}
-
-                        {attestationForm.sections.map((section) => {
-                          const sectionMax = section.items.reduce((sum, i) => sum + i.maxPoints, 0);
-                          const draft = newItemBySection[section.id] ?? { title: "", maxPoints: "2" };
-                          return (
-                            <div key={section.id} className="rounded border border-slate-200">
-                              <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-3 py-1.5">
-                                {canEditTemplates ? (
-                                  <input
-                                    key={section.id + section.title}
-                                    defaultValue={section.title}
-                                    onBlur={(e) => renameSection(section.id, e.target.value)}
-                                    className="flex-1 rounded border border-transparent bg-transparent px-1 py-0.5 text-sm font-medium text-slate-800 hover:border-slate-300 focus:border-slate-400 focus:bg-white"
-                                  />
-                                ) : (
-                                  <span className="text-sm font-medium text-slate-800">{section.title}</span>
-                                )}
-                                <span className="text-slate-400 text-sm">({sectionMax})</span>
-                                {canEditTemplates && (
-                                  <button onClick={() => deleteSection(section.id)} className="ml-2 text-xs text-rose-600 hover:text-rose-800">
-                                    видалити розділ
-                                  </button>
-                                )}
-                              </div>
-                              <ul className="divide-y divide-slate-100">
-                                {section.items.map((item) => (
-                                  <li key={item.id} className="flex items-center justify-between px-3 py-1.5 text-sm">
-                                    {canEditTemplates ? (
-                                      <input
-                                        key={item.id + item.title}
-                                        defaultValue={item.title}
-                                        onBlur={(e) => renameItem(item.id, e.target.value)}
-                                        className="flex-1 rounded border border-transparent bg-transparent px-1 py-0.5 text-slate-700 hover:border-slate-300 focus:border-slate-400 focus:bg-white"
-                                      />
-                                    ) : (
-                                      <span className="text-slate-700">{item.title}</span>
-                                    )}
-                                    <span className="flex items-center gap-2">
-                                      <span className="text-slate-400">макс {item.maxPoints}</span>
-                                      {canEditTemplates && (
-                                        <button onClick={() => deleteItem(item.id)} className="text-xs text-rose-600 hover:text-rose-800">
-                                          видалити
-                                        </button>
-                                      )}
-                                    </span>
-                                  </li>
-                                ))}
-                                {!section.items.length && <li className="px-3 py-2 text-xs text-slate-400">Пунктів ще немає.</li>}
-                              </ul>
-                              {canEditTemplates && (
-                                <div className="flex items-center gap-2 border-t border-slate-100 px-3 py-1.5">
-                                  <input
-                                    value={draft.title}
-                                    onChange={(e) =>
-                                      setNewItemBySection((prev) => ({ ...prev, [section.id]: { ...draft, title: e.target.value } }))
-                                    }
-                                    placeholder="Новий пункт"
-                                    className="flex-1 rounded border border-slate-300 px-2 py-1 text-xs"
-                                  />
-                                  <input
-                                    type="number"
-                                    min={1}
-                                    value={draft.maxPoints}
-                                    onChange={(e) =>
-                                      setNewItemBySection((prev) => ({ ...prev, [section.id]: { ...draft, maxPoints: e.target.value } }))
-                                    }
-                                    className="w-14 rounded border border-slate-300 px-2 py-1 text-xs"
-                                  />
-                                  <button onClick={() => addItem(section.id)} className="text-xs font-medium text-slate-700 hover:text-slate-900">
-                                    + пункт
-                                  </button>
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-
-                        {canEditTemplates && (
-                          <div className="flex items-center gap-2">
-                            <input
-                              value={newSectionTitle}
-                              onChange={(e) => setNewSectionTitle(e.target.value)}
-                              placeholder="Назва нового розділу"
-                              className="flex-1 rounded border border-slate-300 px-2 py-1.5 text-sm"
-                            />
-                            <button onClick={addSection} className="rounded border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-50">
-                              + Розділ
-                            </button>
-                          </div>
-                        )}
                       </div>
                     )}
                   </Section>

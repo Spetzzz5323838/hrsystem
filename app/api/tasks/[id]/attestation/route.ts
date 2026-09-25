@@ -22,12 +22,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   const body = await request.json().catch(() => null);
   const scores = Array.isArray(body?.scores)
-    ? body.scores.map((s: { itemId: unknown; score: unknown }) => ({ itemId: Number(s.itemId), score: Number(s.score) }))
+    ? body.scores.map((s: { competencyId: unknown; score: unknown }) => ({ competencyId: Number(s.competencyId), score: Number(s.score) }))
     : null;
-  if (!scores) return NextResponse.json({ error: "Потрібні оцінки по пунктах" }, { status: 400 });
+  if (!scores) return NextResponse.json({ error: "Потрібні оцінки по компетенціях" }, { status: 400 });
 
   const result = await submitAttestation(taskId, task.assignee.id, scores);
   if (!result.ok) return NextResponse.json({ error: result.error }, { status: 409 });
 
-  return NextResponse.json({ ok: true, passed: result.passed, percent: Math.round(result.percent) });
+  return NextResponse.json({ ok: true, passed: result.passed, missingRequired: result.missingRequired });
 }

@@ -469,7 +469,6 @@ model PositionProfile {
   staffUnits             StaffUnit[]
   accessAssignments      PositionAccessAssignment[]
   positionCompetencies   PositionCompetency[]
-  attestationTemplate    AttestationTemplate?
   reviewCriterionWeights ReviewCriterionWeight[]
   curatorEligibilities   CuratorEligibility[]
 }
@@ -683,18 +682,23 @@ model Competency {
   resetOnBreakMonths Int?
   isBonus            Boolean @default(false)
 
-  positionCompetencies   PositionCompetency[]
-  records                CompetencyRecord[]
-  materials              Material[]
-  checklistItemTemplates ChecklistItemTemplate[]
+  positionCompetencies    PositionCompetency[]
+  records                 CompetencyRecord[]
+  materials               Material[]
+  checklistItemTemplates  ChecklistItemTemplate[]
+  attestationScores       AttestationCompetencyScore[]
 }
 
-/// Що вимагає профіль посади.
+/// Що вимагає профіль посади. isRequired розрізняє обов'язкову й
+/// рекомендовану компетенцію (тема "посада — компетенції — атестація",
+/// 2026-09-25) — обов'язкові блокують допуск до роботи при атестації,
+/// рекомендовані лише оцінюються, без блокування.
 model PositionCompetency {
   positionProfileId Int
   positionProfile   PositionProfile @relation(fields: [positionProfileId], references: [id])
   competencyId      Int
   competency        Competency      @relation(fields: [competencyId], references: [id])
+  isRequired        Boolean         @default(true)
 
   @@id([positionProfileId, competencyId])
 }
@@ -778,79 +782,40 @@ model ChecklistItemTemplate {
   @@index([templateId])
 }
 
-/// Конструктор чек-листа атестації (docs catalogs-v1.1 §7) — один на
-/// посаду, SYSADMIN редагує через /catalog без розробника. Без формальних
-/// версій (на відміну від ProcessTemplate): AttestationAttempt зберігає
-/// власний знімок passThresholdPercent/maxScore на момент складання, тож
-/// редагування шаблона заднім числом не переписує вже здані спроби.
-model AttestationTemplate {
-  id                   Int             @id @default(autoincrement())
-  positionProfileId    Int             @unique
-  positionProfile      PositionProfile @relation(fields: [positionProfileId], references: [id])
-  passThresholdPercent Int
-
-  sections AttestationSection[]
-}
-
-model AttestationSection {
-  id         Int                 @id @default(autoincrement())
-  templateId Int
-  template   AttestationTemplate @relation(fields: [templateId], references: [id])
-  order      Int
-  title      String
-
-  items AttestationItem[]
-
-  @@index([templateId])
-}
-
-/// maxPoints зазвичай 2 (докс: "у кожному пункти з оцінкою 0/1/2"), але
-/// для розділів з одним-двома пунктами на всю суму розділу (напр.
-/// "Практика" у прикладах докс) — вище, щоб сума розділу збігалася з
-/// задокументованою.
-model AttestationItem {
-  id        Int                @id @default(autoincrement())
-  sectionId Int
-  section   AttestationSection @relation(fields: [sectionId], references: [id])
-  order     Int
-  title     String
-  maxPoints Int                @default(2)
-
-  scores AttestationItemScore[]
-
-  @@index([sectionId])
-}
-
-/// Одна спроба скласти атестацію. passThresholdPercent/maxScore —
-/// знімок на момент складання (docs catalogs-v1.1 §7.3: історія спроб не
-/// повинна "переписуватись", якщо адмін пізніше відредагує форму).
+/// Атестація більше не конструюється вручну (текстові розділи/пункти) —
+/// таблиця збирається автоматично зі списку PositionCompetency посади,
+/// один рядок на компетенцію (тема "посада — компетенції — атестація",
+/// 2026-09-25, замінює старий AttestationTemplate/Section/Item). Бал 0/1/2
+/// на кожну; 1 і 2 — компетенція зарахована, 0 — ні. Допуск до роботи —
+/// коли зараховані ВСІ обов'язкові (isRequired=true) компетенції посади,
+/// рекомендовані оцінюються, але не блокують. Позиція без жодної
+/// PositionCompetency — атестації немає, проста кнопка (як і раніше).
 model AttestationAttempt {
-  id                   Int        @id @default(autoincrement())
-  employmentId         Int
-  employment           Employment @relation(fields: [employmentId], references: [id])
-  attemptNumber        Int
-  totalScore           Int
-  maxScore             Int
-  passThresholdPercent Int
-  passed               Boolean
-  gradedById           Int
-  gradedBy             Employment @relation("AttestationGradedBy", fields: [gradedById], references: [id])
-  occurredAt           DateTime   @default(now())
+  id            Int        @id @default(autoincrement())
+  employmentId  Int
+  employment    Employment @relation(fields: [employmentId], references: [id])
+  attemptNumber Int
+  passed        Boolean
+  gradedById    Int
+  gradedBy      Employment @relation("AttestationGradedBy", fields: [gradedById], references: [id])
+  occurredAt    DateTime   @default(now())
 
-  itemScores AttestationItemScore[]
+  competencyScores AttestationCompetencyScore[]
 
   @@index([employmentId])
 }
 
-model AttestationItemScore {
-  id        Int                @id @default(autoincrement())
-  attemptId Int
-  attempt   AttestationAttempt @relation(fields: [attemptId], references: [id])
-  itemId    Int
-  item      AttestationItem    @relation(fields: [itemId], references: [id])
-  score     Int
+model AttestationCompetencyScore {
+  id           Int                @id @default(autoincrement())
+  attemptId    Int
+  attempt      AttestationAttempt @relation(fields: [attemptId], references: [id])
+  competencyId Int
+  competency   Competency         @relation(fields: [competencyId], references: [id])
+  /// 0 (не здав) / 1 (треба попрацювати, зараховано) / 2 (молодець).
+  score        Int
 
   @@index([attemptId])
+  @@index([competencyId])
 }
 
 /// Конкретний запуск шаблону для конкретного працевлаштування.
