@@ -68,6 +68,36 @@ function Badge({ status }: { status: string }) {
   return <span className={`inline-flex items-center border px-2 py-0.5 text-xs font-medium rounded ${meta.cls}`}>{meta.label}</span>;
 }
 
+// Сортування таблиці кліком по заголовку (2026-09-25) — той самий
+// механізм, що в app/catalog/page.tsx.
+type SortField = "fullName" | "positionTitle" | "objectName" | "status" | "curatorName" | "competency";
+type SortState = { field: SortField; dir: "asc" | "desc" };
+
+function toggleSort(current: SortState, field: SortField): SortState {
+  if (current.field === field) return { field, dir: current.dir === "asc" ? "desc" : "asc" };
+  return { field, dir: "asc" };
+}
+
+function compareValues(a: unknown, b: unknown): number {
+  if (a == null && b == null) return 0;
+  if (a == null) return -1;
+  if (b == null) return 1;
+  if (typeof a === "number" && typeof b === "number") return a - b;
+  return String(a).localeCompare(String(b), "uk");
+}
+
+function SortTh({ label, field, sort, onSort }: { label: string; field: SortField; sort: SortState; onSort: (field: SortField) => void }) {
+  const active = sort.field === field;
+  return (
+    <th onClick={() => onSort(field)} className="cursor-pointer select-none px-4 py-2 font-medium hover:text-slate-800">
+      <span className="inline-flex items-center gap-1">
+        {label}
+        <span className="w-2.5 text-[10px] text-slate-400">{active ? (sort.dir === "asc" ? "▲" : "▼") : ""}</span>
+      </span>
+    </th>
+  );
+}
+
 export default function EmployeesPage() {
   const [q, setQ] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
@@ -75,6 +105,7 @@ export default function EmployeesPage() {
   const [data, setData] = useState<ListResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [sort, setSort] = useState<SortState>({ field: "fullName", dir: "asc" });
 
   useEffect(() => {
     const params = new URLSearchParams();
@@ -264,18 +295,30 @@ export default function EmployeesPage() {
 
         <div className="overflow-hidden border border-slate-200 bg-white rounded-md">
           <table className="w-full text-sm">
-            <thead className="border-b border-slate-200 bg-slate-50 text-left text-xs text-slate-500">
+            <thead className="border-b border-slate-200 bg-slate-50 text-xs text-slate-500">
               <tr>
-                <th className="px-4 py-2 font-medium">Працівник</th>
-                <th className="px-4 py-2 font-medium">Посада</th>
-                <th className="px-4 py-2 font-medium">Місце роботи</th>
-                <th className="px-4 py-2 font-medium">Статус</th>
-                <th className="px-4 py-2 font-medium">Куратор</th>
-                <th className="px-4 py-2 font-medium">Компетенції</th>
+                <SortTh label="Працівник" field="fullName" sort={sort} onSort={(f) => setSort((s) => toggleSort(s, f))} />
+                <SortTh label="Посада" field="positionTitle" sort={sort} onSort={(f) => setSort((s) => toggleSort(s, f))} />
+                <SortTh label="Місце роботи" field="objectName" sort={sort} onSort={(f) => setSort((s) => toggleSort(s, f))} />
+                <SortTh label="Статус" field="status" sort={sort} onSort={(f) => setSort((s) => toggleSort(s, f))} />
+                <SortTh label="Куратор" field="curatorName" sort={sort} onSort={(f) => setSort((s) => toggleSort(s, f))} />
+                <SortTh label="Компетенції" field="competency" sort={sort} onSort={(f) => setSort((s) => toggleSort(s, f))} />
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {data.employees.map((e) => (
+              {[...data.employees]
+                .sort((a, b) => {
+                  const value = (r: EmployeeRow) =>
+                    sort.field === "status"
+                      ? (STATUS_LABELS[r.status]?.label ?? r.status)
+                      : sort.field === "competency"
+                        ? r.competencyTotal > 0
+                          ? r.competencyDone / r.competencyTotal
+                          : -1
+                        : r[sort.field];
+                  return (sort.dir === "asc" ? 1 : -1) * compareValues(value(a), value(b));
+                })
+                .map((e) => (
                 <tr key={e.employmentId} className="hover:bg-slate-50">
                   <td className="px-4 py-2">
                     <Link href={`/employees/${e.employmentId}`} className="flex items-center gap-2.5">
