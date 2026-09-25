@@ -745,16 +745,24 @@ const baseChecklistItems: ChecklistItemSeed[] = [
 ];
 
 const moduleChecklistItems: ChecklistItemSeed[] = [
-  { order: 100, title: "Реєстрація на касовому апараті", responsibleRole: Role.ONEC_ADMIN, actionType: ActionType.MARK, isBlocking: true, slaHours: 24, module: ChecklistModule.CASHIER },
-  { order: 101, title: "Навчання роботі з ПРРО й поверненнями", responsibleRole: Role.CURATOR, actionType: ActionType.MARK, isBlocking: true, slaHours: 48, module: ChecklistModule.CASHIER },
-  { order: 102, title: "Інструктаж з інкасації", responsibleRole: Role.STORE_ADMIN, actionType: ActionType.MARK, isBlocking: true, slaHours: 24, module: ChecklistModule.CASHIER },
+  // Правки 20.09.2026, п.11 (розібрано з користувачем 2026-09-25): прибрано
+  // "Навчання роботі з ПРРО й поверненнями"/"Інструктаж з інкасації" —
+  // прості MARK-галочки без зв'язку з компетенцією, зайва бюрократія.
+  // "Реєстрація на касовому апараті" (доступ до каси) посунута ПІСЛЯ
+  // атестації (order 201, атестація — order 200) — з міркувань безпеки:
+  // доступ до каси лише після підтвердженої компетентності, не на старті
+  // модуля. "Тест «Каса»" лишено як є — єдиний пункт із реальним
+  // оцінюванням (бал 0-100), на відміну від MARK.
   { order: 103, title: "Тест «Каса»", responsibleRole: Role.EMPLOYEE, actionType: ActionType.TEST, isBlocking: true, slaHours: 168, module: ChecklistModule.CASHIER, competencyCode: "CASHIER_PRRO" },
+  { order: 201, title: "Реєстрація на касовому апараті", responsibleRole: Role.ONEC_ADMIN, actionType: ActionType.MARK, isBlocking: true, slaHours: 24, module: ChecklistModule.CASHIER },
 
   { order: 111, title: "Прийом-передача ТМЦ", responsibleRole: Role.STORE_ADMIN, actionType: ActionType.MARK, isBlocking: true, slaHours: 72, module: ChecklistModule.MVO },
   { order: 112, title: "Ознайомлення з порядком інвентаризації", responsibleRole: Role.STORE_ADMIN, actionType: ActionType.MARK, isBlocking: false, slaHours: 72, module: ChecklistModule.MVO },
 
+  // Правки 20.09.2026, п.11: "Інструктаж з санітарії та HACCP" прибрано —
+  // дублює тест 124 і матеріал компетенції SANITATION_HACCP, сам нічого
+  // не записує (той самий випадок, що й 101/102 у касира).
   { order: 120, title: "Медкнижка з чинними відмітками", responsibleRole: Role.ACCOUNTANT, actionType: ActionType.UPLOAD, isBlocking: true, slaHours: 72, module: ChecklistModule.FOOD },
-  { order: 121, title: "Інструктаж з санітарії та HACCP", responsibleRole: Role.STORE_ADMIN, actionType: ActionType.MARK, isBlocking: true, slaHours: 24, module: ChecklistModule.FOOD },
   { order: 122, title: "Правила особистої гігієни", responsibleRole: Role.STORE_ADMIN, actionType: ActionType.MARK, isBlocking: false, slaHours: 24, module: ChecklistModule.FOOD },
   { order: 123, title: "Видача санітарного одягу", responsibleRole: Role.STORE_ADMIN, actionType: ActionType.MARK, isBlocking: false, slaHours: 72, module: ChecklistModule.FOOD },
   { order: 124, title: "Тест «Санітарія»", responsibleRole: Role.EMPLOYEE, actionType: ActionType.TEST, isBlocking: true, slaHours: 168, module: ChecklistModule.FOOD, competencyCode: "SANITATION_HACCP" },
@@ -788,23 +796,57 @@ const moduleChecklistItems: ChecklistItemSeed[] = [
   { order: 182, title: "Ознайомлення з регламентами відділу", responsibleRole: Role.ACCOUNTANT, actionType: ActionType.MARK, isBlocking: false, slaHours: 48, module: ChecklistModule.OFFICE },
 ];
 
+/**
+ * Версіонування за фактичним найновішим рядком у базі, не за жорстко
+ * зашитим номером (правки 20.09.2026, п.11 — тут виявлено, що
+ * ONBOARDING_BASE вже мав версії аж до v3 з попередньої, недокументованої
+ * сесії; перевірка "чи є вже v2" тому мовчки нічого не робила). Порівнює
+ * бажаний фінальний список пунктів із пунктами найновішої версії — якщо
+ * збігається, нова версія не потрібна (ідемпотентно); якщо ні — деактивує
+ * найновішу й створює наступну.
+ */
 async function seedOnboardingTemplate() {
-  const existing = await prisma.processTemplate.findUnique({
-    where: { code_version: { code: "ONBOARDING_BASE", version: 1 } },
-  });
-  if (existing) return;
+  const desiredItems = [...baseChecklistItems, ...moduleChecklistItems];
 
-  const template = await prisma.processTemplate.create({
-    data: { code: "ONBOARDING_BASE", version: 1, type: ProcessType.ONBOARDING, name: "Онбординг — базовий трек" },
+  const existingVersions = await prisma.processTemplate.findMany({
+    where: { code: "ONBOARDING_BASE" },
+    include: { items: true },
+    orderBy: { version: "desc" },
   });
 
+  if (!existingVersions.length) {
+    const template = await prisma.processTemplate.create({
+      data: { code: "ONBOARDING_BASE", version: 1, type: ProcessType.ONBOARDING, name: "Онбординг — базовий трек" },
+    });
+    await createOnboardingItems(template.id);
+    return;
+  }
+
+  const current = existingVersions[0];
+  const matches =
+    current.items.length === desiredItems.length &&
+    desiredItems.every((d) =>
+      current.items.some((i) => i.order === d.order && i.title === d.title && i.isBlocking === d.isBlocking && i.actionType === d.actionType),
+    );
+  if (matches) return;
+
+  if (current.isActive) {
+    await prisma.processTemplate.update({ where: { id: current.id }, data: { isActive: false } });
+  }
+  const next = await prisma.processTemplate.create({
+    data: { code: "ONBOARDING_BASE", version: current.version + 1, type: ProcessType.ONBOARDING, name: "Онбординг — базовий трек" },
+  });
+  await createOnboardingItems(next.id);
+}
+
+async function createOnboardingItems(templateId: number) {
   for (const item of [...baseChecklistItems, ...moduleChecklistItems]) {
     const competency = item.competencyCode
       ? await prisma.competency.findUniqueOrThrow({ where: { code: item.competencyCode } })
       : null;
     await prisma.checklistItemTemplate.create({
       data: {
-        templateId: template.id,
+        templateId,
         order: item.order,
         title: item.title,
         responsibleRole: item.responsibleRole,
@@ -1159,14 +1201,15 @@ const terminationChecklistItems: ChecklistItemSeed[] = [
   { order: 16, title: "Архівація профілю, статус TERMINATED", responsibleRole: null, actionType: ActionType.AUTO, isBlocking: true, slaHours: 0, module: null },
 ];
 
+/** Те саме версіонування за фактичною найновішою версією, що й seedOnboardingTemplate вище. */
 async function seedOffboardingTemplate() {
-  const v1 = await prisma.processTemplate.findUnique({
-    where: { code_version: { code: "OFFBOARDING_BASE", version: 1 } },
+  const existingVersions = await prisma.processTemplate.findMany({
+    where: { code: "OFFBOARDING_BASE" },
+    include: { items: true },
+    orderBy: { version: "desc" },
   });
 
-  if (!v1) {
-    // Свіжа база — одразу створюємо v1 з фінальними (вже виправленими)
-    // значеннями isBlocking, версія 2 тут не потрібна.
+  if (!existingVersions.length) {
     const template = await prisma.processTemplate.create({
       data: { code: "OFFBOARDING_BASE", version: 1, type: ProcessType.OFFBOARDING, name: "Звільнення — базовий чек-ліст" },
     });
@@ -1174,23 +1217,21 @@ async function seedOffboardingTemplate() {
     return;
   }
 
-  // v1 уже існує (стара база, ще зі старими isBlocking) — версіонування
-  // замість редагування рядків v1 (архітектурне рішення №6 з CLAUDE.md:
-  // "редагування шаблона створює нову версію й не ламає активні процеси").
-  // isBlocking читається наживо з ChecklistItemTemplate, тож правка рядків
-  // v1 одразу вплинула б і на вже запущені звільнення.
-  const v2 = await prisma.processTemplate.findUnique({
-    where: { code_version: { code: "OFFBOARDING_BASE", version: 2 } },
-  });
-  if (v2) return;
+  const current = existingVersions[0];
+  const matches =
+    current.items.length === terminationChecklistItems.length &&
+    terminationChecklistItems.every((d) =>
+      current.items.some((i) => i.order === d.order && i.title === d.title && i.isBlocking === d.isBlocking && i.actionType === d.actionType),
+    );
+  if (matches) return;
 
-  if (v1.isActive) {
-    await prisma.processTemplate.update({ where: { id: v1.id }, data: { isActive: false } });
+  if (current.isActive) {
+    await prisma.processTemplate.update({ where: { id: current.id }, data: { isActive: false } });
   }
-  const template2 = await prisma.processTemplate.create({
-    data: { code: "OFFBOARDING_BASE", version: 2, type: ProcessType.OFFBOARDING, name: "Звільнення — базовий чек-ліст" },
+  const next = await prisma.processTemplate.create({
+    data: { code: "OFFBOARDING_BASE", version: current.version + 1, type: ProcessType.OFFBOARDING, name: "Звільнення — базовий чек-ліст" },
   });
-  await createOffboardingItems(template2.id);
+  await createOffboardingItems(next.id);
 }
 
 async function createOffboardingItems(templateId: number) {
