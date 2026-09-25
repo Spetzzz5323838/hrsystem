@@ -362,6 +362,8 @@ const ACCESS_PROFILES: AccessProfileSeed[] = [
       // ще не дає погоджувати ескальовані заявки об'єктному адміну.
       Capability.APPROVE_VACATION,
       Capability.PRINT_BADGE,
+      Capability.MANAGE_VACANCIES,
+      Capability.MANAGE_ANNOUNCEMENTS,
     ],
   },
   { name: "Аналітика", capabilities: [Capability.VIEW_ANALYTICS] },
@@ -1372,6 +1374,21 @@ const notificationTemplates: { key: string; description: string; text: string }[
     key: "auth.cabinetPasswordReset",
     description: "Новий пароль кабінету після скидання (боту або адміном)",
     text: "Ваш новий пароль до кабінету: {{password}}. Попередній більше не діє. Якщо це були не ви — негайно повідомте адміністратора.",
+  },
+  {
+    key: "announcement.posted",
+    description: "Оголошення для працівника в межах адресованого вузла",
+    text: "📢 {{title}}\n\n{{body}}",
+  },
+  {
+    key: "poll.opened",
+    description: "Нове опитування — питання й кнопки-варіанти (кнопки формуються окремо, не в тексті шаблону)",
+    text: "🗳 {{question}}\n\nОберіть варіант кнопкою нижче.",
+  },
+  {
+    key: "vacancy.opened",
+    description: "Адміністратору об'єкта — з'явилась вакансія",
+    text: "Нова вакансія: {{positionTitle}} ({{objectName}}) — {{reason}}. Потрібно розмістити оголошення й почати пошук кандидатів.",
   },
   {
     key: "reminder.due",

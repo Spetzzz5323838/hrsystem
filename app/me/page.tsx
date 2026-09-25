@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { MyAnnouncements, MyPolls } from "../components/MyCommunications";
 
 const STATUS_LABELS: Record<string, { label: string; cls: string }> = {
   REGISTERED: { label: "Зареєстрований", cls: "bg-slate-100 text-slate-700 border-slate-300" },
@@ -176,6 +177,9 @@ export default function MePage() {
           Вийти
         </button>
       </div>
+
+      <MyAnnouncements />
+      <MyPolls />
 
       {checklist?.instance && (
         <Section title={`${PROCESS_TYPE_LABELS[checklist.instance.type] ?? checklist.instance.type} — прогрес`}>

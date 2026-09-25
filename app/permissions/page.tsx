@@ -52,6 +52,8 @@ const CAPABILITY_LABELS: Record<string, string> = {
   PRINT_BADGE: "Друк бейджа-перепустки",
   RESET_CABINET_PASSWORD: "Скидання пароля кабінету",
   FORCE_COMPLETE_TASK: "Примусове завершення пункту чек-листа",
+  MANAGE_VACANCIES: "Керування вакансіями",
+  MANAGE_ANNOUNCEMENTS: "Оголошення й опитування",
 };
 
 const SCOPE_LABELS: Record<string, string> = {

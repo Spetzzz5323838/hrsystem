@@ -90,6 +90,12 @@ enum Capability {
   /// п.9) — щоб процес не зависав, якщо призначений виконавець фізично
   /// недоступний (напр. втратив доступ до свого Telegram).
   FORCE_COMPLETE_TASK
+  /// Керування вакансіями (з розмови 2026-09-23, поза докс) — створення й
+  /// закриття задач "закрити вакансію".
+  MANAGE_VACANCIES
+  /// Оголошення й опитування (з розмови 2026-09-24, поза докс) — область
+  /// дії визначає, на який вузол дерева можна надіслати.
+  MANAGE_ANNOUNCEMENTS
 }
 
 enum EmploymentStatus {
@@ -223,6 +229,8 @@ model OrgNode {
   roleAssignments           RoleAssignment[]
   equipment                 Equipment[]
   pendingHires              PendingHire[]
+  announcements             Announcement[]
+  polls                     Poll[]
 
   @@index([path])
 }
@@ -274,6 +282,7 @@ model Person {
   loginChallenges   LoginChallenge[]
   trustedDevices    TrustedDevice[]
   notifications     Notification[]
+  pollVotes         PollVote[]
 }
 
 /// Веб-сесія після входу. У базі — тільки хеш токена (SHA-256), сам
@@ -410,6 +419,10 @@ model Employment {
   authoredReminders           Reminder[]           @relation("ReminderAuthor")
   curatorEligibilities        CuratorEligibility[] @relation("CuratorEligibilities")
   grantedCuratorEligibilities CuratorEligibility[] @relation("CuratorEligibilityGrantedBy")
+  createdVacancies            Vacancy[]            @relation("VacancyCreatedBy")
+  closedVacancies             Vacancy[]            @relation("VacancyClosedBy")
+  authoredAnnouncements       Announcement[]       @relation("AnnouncementAuthor")
+  authoredPolls               Poll[]               @relation("PollAuthor")
 
   @@index([personId])
   @@index([staffUnitId])
@@ -489,8 +502,119 @@ model StaffUnit {
   plannedHeadcount  Int             @default(1)
 
   employments Employment[]
+  vacancies   Vacancy[]
 
   @@unique([positionProfileId, orgNodeId])
+}
+
+enum VacancyReason {
+  TERMINATION
+  NEW_POSITION
+  HEADCOUNT_INCREASE
+}
+
+enum VacancyStatus {
+  OPEN
+  POSTED
+  CLOSED
+}
+
+/// Задача "закрити вакансію" (з розмови 2026-09-23, поза докс) — проста
+/// задача-нагадування, НЕ картка кандидатів. Автоматично при звільненні
+/// й новій посаді (lib/termination.ts::startTermination,
+/// app/api/staff-units/route.ts::POST); вручну — при зростанні плану чи
+/// будь-коли адміністратором. Гейт MANAGE_VACANCIES, OWN_OBJECT для
+/// адміністратора магазину / OWN_SUBTREE для кластерного керівника —
+/// та сама область автоматично дає кластерному керівнику "зведення" по
+/// всьому кластеру, без окремого механізму.
+model Vacancy {
+  id          Int           @id @default(autoincrement())
+  staffUnitId Int
+  staffUnit   StaffUnit     @relation(fields: [staffUnitId], references: [id])
+  reason      VacancyReason
+  status      VacancyStatus @default(OPEN)
+  note        String?
+  createdById Int?
+  createdBy   Employment?   @relation("VacancyCreatedBy", fields: [createdById], references: [id])
+  closedById  Int?
+  closedBy    Employment?   @relation("VacancyClosedBy", fields: [closedById], references: [id])
+  createdAt   DateTime      @default(now())
+  postedAt    DateTime?
+  closedAt    DateTime?
+
+  @@index([staffUnitId])
+}
+
+/// Оголошення (з розмови 2026-09-24, поза докс) — керівник обирає вузол
+/// дерева (відділ/магазин/кластер/компанія) у межах своєї дозволеної
+/// області, повідомлення йде всім активним працівникам у цьому вузлі й
+/// нижче. Гейт MANAGE_ANNOUNCEMENTS, та сама модель області, що й Vacancy.
+model Announcement {
+  id        Int         @id @default(autoincrement())
+  orgNodeId Int
+  orgNode   OrgNode     @relation(fields: [orgNodeId], references: [id])
+  title     String
+  body      String
+  authorId  Int?
+  author    Employment? @relation("AnnouncementAuthor", fields: [authorId], references: [id])
+  createdAt DateTime    @default(now())
+
+  @@index([orgNodeId])
+}
+
+enum PollStatus {
+  OPEN
+  CLOSED
+}
+
+/// Опитування (з розмови 2026-09-24, поза докс) — та сама модель області,
+/// що Announcement. isAnonymous керує лише тим, що видно в результатах
+/// (lib/polls.ts) — сам голос (PollVote.personId) завжди зберігається, щоб
+/// не дати проголосувати двічі; при анонімному опитуванні автор бачить
+/// тільки підсумкові цифри, не хто саме як проголосував.
+model Poll {
+  id          Int         @id @default(autoincrement())
+  orgNodeId   Int
+  orgNode     OrgNode     @relation(fields: [orgNodeId], references: [id])
+  question    String
+  isAnonymous Boolean     @default(false)
+  status      PollStatus  @default(OPEN)
+  authorId    Int?
+  author      Employment? @relation("PollAuthor", fields: [authorId], references: [id])
+  createdAt   DateTime    @default(now())
+  closesAt    DateTime?
+  closedAt    DateTime?
+
+  options PollOption[]
+  votes   PollVote[]
+
+  @@index([orgNodeId])
+}
+
+model PollOption {
+  id     Int    @id @default(autoincrement())
+  pollId Int
+  poll   Poll   @relation(fields: [pollId], references: [id], onDelete: Cascade)
+  text   String
+  order  Int
+
+  votes PollVote[]
+
+  @@index([pollId])
+}
+
+model PollVote {
+  id       Int        @id @default(autoincrement())
+  pollId   Int
+  poll     Poll       @relation(fields: [pollId], references: [id], onDelete: Cascade)
+  optionId Int
+  option   PollOption @relation(fields: [optionId], references: [id])
+  personId Int
+  person   Person     @relation(fields: [personId], references: [id])
+  votedAt  DateTime   @default(now())
+
+  @@unique([pollId, personId])
+  @@index([optionId])
 }
 
 /// Профіль доступу — пойменований набір можливостей (capability) БЕЗ

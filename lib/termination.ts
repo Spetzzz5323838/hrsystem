@@ -5,7 +5,8 @@ import { prisma } from "./prisma";
 import { resolveAssignee, completeTask as completeGenericTask } from "./onboarding";
 import { logAudit } from "./audit";
 import { renderClearanceSheetPdf } from "./pdf";
-import { EmploymentStatus, ProcessState, ProcessType, TaskStatus } from "../generated/prisma/client";
+import { createVacancy } from "./vacancies";
+import { EmploymentStatus, ProcessState, ProcessType, TaskStatus, VacancyReason } from "../generated/prisma/client";
 
 // PDF листа узгодження — поза `public/`, як і скани документів.
 const CLEARANCE_STORAGE_ROOT = path.join(process.cwd(), "storage", "clearance-sheets");
@@ -128,6 +129,11 @@ export async function startTermination(
     entityId: employmentId,
     diff: { reasonCode: input.reasonCode, lastWorkingDay: input.lastWorkingDay },
   });
+
+  // Вакансія відкривається одразу при ІНІЦІАЦІЇ звільнення, не при
+  // завершенні (з розмови 2026-09-23) — адміністратор знає заздалегідь і
+  // може почати пошук заміни, поки людина ще доопрацьовує.
+  await createVacancy(employment.staffUnitId, VacancyReason.TERMINATION, initiatorEmploymentId);
 
   return { ok: true, instanceId: instance.id };
 }

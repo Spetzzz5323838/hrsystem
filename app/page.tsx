@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ChevronRight, AlertTriangle } from "lucide-react";
 import AppShell from "./components/AppShell";
+import { MyAnnouncements, MyPolls } from "./components/MyCommunications";
 
 type MyTask = {
   taskId: number;
@@ -33,6 +34,17 @@ type ReminderRow = {
   text: string;
   dueAt: string | null;
   isDone: boolean;
+};
+
+type VacancyRow = {
+  id: number;
+  positionTitle: string;
+  objectName: string;
+  reason: "TERMINATION" | "NEW_POSITION" | "HEADCOUNT_INCREASE";
+  reasonLabel: string;
+  status: "OPEN" | "POSTED" | "CLOSED";
+  note: string | null;
+  createdAt: string;
 };
 
 function fmt(iso: string): string {
@@ -86,12 +98,40 @@ export default function HomePage() {
   const [reminderFilterDone, setReminderFilterDone] = useState(false);
   const [reminderFilterQuery, setReminderFilterQuery] = useState("");
   const [reminderBusyId, setReminderBusyId] = useState<number | null>(null);
+  const [canManageVacancies, setCanManageVacancies] = useState(false);
+  const [vacancies, setVacancies] = useState<VacancyRow[]>([]);
+  const [vacancyBusyId, setVacancyBusyId] = useState<number | null>(null);
+  const [vacancyError, setVacancyError] = useState<string | null>(null);
 
   const loadReminders = (done: boolean) => {
     fetch(`/api/reminders?done=${done}`)
       .then((r) => r.json())
       .then((data) => setReminders(data))
       .catch(() => {});
+  };
+
+  const loadVacancies = () => {
+    fetch("/api/vacancies")
+      .then((r) => (r.ok ? r.json() : []))
+      .then(setVacancies)
+      .catch(() => {});
+  };
+
+  const updateVacancy = (id: number, patch: { status?: "POSTED" | "CLOSED" }) => {
+    setVacancyBusyId(id);
+    setVacancyError(null);
+    fetch(`/api/vacancies/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    })
+      .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
+      .then(({ ok, body }) => {
+        if (!ok) throw new Error(body.error ?? "Не вдалося зберегти");
+        loadVacancies();
+      })
+      .catch((e) => setVacancyError(e.message))
+      .finally(() => setVacancyBusyId(null));
   };
 
   useEffect(() => {
@@ -113,6 +153,10 @@ export default function HomePage() {
           return;
         }
         loadReminders(false);
+        if (me.grants.some((g: { capability: string }) => g.capability === "MANAGE_VACANCIES")) {
+          setCanManageVacancies(true);
+          loadVacancies();
+        }
         return fetch("/api/me/tasks")
           .then((r2) => r2.json())
           .then((data) => {
@@ -161,6 +205,9 @@ export default function HomePage() {
   return (
     <AppShell active="/">
       <div className="space-y-4">
+        <MyAnnouncements />
+        <MyPolls />
+
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-xl font-semibold text-slate-900">Мої задачі</h2>
           {myTasks.length > 0 && (
@@ -215,6 +262,50 @@ export default function HomePage() {
               </div>
             </div>
           ))}
+
+        {canManageVacancies && vacancies.length > 0 && (
+          <div className="rounded-md border border-slate-200 bg-white">
+            <div className="border-b border-slate-100 px-4 py-2 text-sm font-medium text-slate-700">Вакансії</div>
+            {vacancyError && <p className="px-4 pt-2 text-sm text-rose-700">{vacancyError}</p>}
+            <div className="divide-y divide-slate-100">
+              {vacancies.map((v) => (
+                <div key={v.id} className="flex flex-wrap items-center gap-3 px-4 py-2.5">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm text-slate-800">
+                      {v.positionTitle} <span className="text-slate-400">— {v.objectName}</span>
+                    </p>
+                    <p className="text-xs text-slate-500">{v.reasonLabel}</p>
+                  </div>
+                  <span
+                    className={`rounded border px-2 py-0.5 text-xs ${
+                      v.status === "OPEN" ? "border-amber-300 bg-amber-50 text-amber-800" : "border-sky-300 bg-sky-50 text-sky-800"
+                    }`}
+                  >
+                    {v.status === "OPEN" ? "відкрита" : "розміщена"}
+                  </span>
+                  <div className="flex gap-2">
+                    {v.status === "OPEN" && (
+                      <button
+                        disabled={vacancyBusyId === v.id}
+                        onClick={() => updateVacancy(v.id, { status: "POSTED" })}
+                        className="rounded border border-slate-300 px-2.5 py-1 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                      >
+                        Позначити розміщеною
+                      </button>
+                    )}
+                    <button
+                      disabled={vacancyBusyId === v.id}
+                      onClick={() => updateVacancy(v.id, { status: "CLOSED" })}
+                      className="rounded bg-slate-800 px-2.5 py-1 text-xs font-medium text-white hover:bg-slate-700 disabled:opacity-50"
+                    >
+                      Закрити
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {expiring.length > 0 && (
           <div className="rounded-md border border-slate-200 bg-white">

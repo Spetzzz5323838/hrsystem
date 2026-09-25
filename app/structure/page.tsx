@@ -264,6 +264,7 @@ export default function StructurePage() {
   const [copied, setCopied] = useState(false);
 
   const [canManage, setCanManage] = useState(false);
+  const [canManageVacancies, setCanManageVacancies] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [showTemplate, setShowTemplate] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
@@ -288,8 +289,14 @@ export default function StructurePage() {
   useEffect(() => {
     fetch("/api/me")
       .then((r) => (r.ok ? r.json() : null))
-      .then((me) => setCanManage(!!me?.grants?.some((g: { capability: string }) => g.capability === "MANAGE_ORG_STRUCTURE")))
-      .catch(() => setCanManage(false));
+      .then((me) => {
+        setCanManage(!!me?.grants?.some((g: { capability: string }) => g.capability === "MANAGE_ORG_STRUCTURE"));
+        setCanManageVacancies(!!me?.grants?.some((g: { capability: string }) => g.capability === "MANAGE_VACANCIES"));
+      })
+      .catch(() => {
+        setCanManage(false);
+        setCanManageVacancies(false);
+      });
     fetch("/api/position-profiles")
       .then((r) => (r.ok ? r.json() : []))
       .then((list: { id: number; title: string }[]) => setAllPositions(list))
@@ -535,6 +542,26 @@ export default function StructurePage() {
       .finally(() => setSuBusyId(null));
   };
 
+  const [vacancyCreatedForId, setVacancyCreatedForId] = useState<number | null>(null);
+
+  const createVacancyForStaffUnit = (staffUnitId: number) => {
+    setSuBusyId(staffUnitId);
+    setSuError(null);
+    fetch("/api/vacancies", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ staffUnitId, reason: "HEADCOUNT_INCREASE" }),
+    })
+      .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
+      .then(({ ok, body }) => {
+        if (!ok) throw new Error(body.error ?? "Не вдалося створити вакансію");
+        setVacancyCreatedForId(staffUnitId);
+        setTimeout(() => setVacancyCreatedForId((cur) => (cur === staffUnitId ? null : cur)), 3000);
+      })
+      .catch((e) => setSuError(e.message))
+      .finally(() => setSuBusyId(null));
+  };
+
   return (
     <AppShell active="/structure">
       <div className="space-y-4">
@@ -723,13 +750,28 @@ export default function StructurePage() {
                             </td>
                             <td className="px-4 py-2 text-right tabular-nums text-slate-600">{su.actualCount}</td>
                             <td className="px-4 py-2 text-right">
-                              <button
-                                disabled={suBusyId === su.id}
-                                onClick={() => deleteStaffUnit(su.id)}
-                                className="text-xs text-rose-600 hover:text-rose-800 disabled:opacity-40"
-                              >
-                                видалити
-                              </button>
+                              <div className="flex items-center justify-end gap-2">
+                                {canManageVacancies &&
+                                  (vacancyCreatedForId === su.id ? (
+                                    <span className="text-xs text-emerald-700">вакансію створено</span>
+                                  ) : (
+                                    <button
+                                      disabled={suBusyId === su.id}
+                                      onClick={() => createVacancyForStaffUnit(su.id)}
+                                      title="Створити вакансію на цю посаду (напр. при зростанні плану)"
+                                      className="text-xs text-slate-600 hover:text-slate-900 disabled:opacity-40"
+                                    >
+                                      + вакансія
+                                    </button>
+                                  ))}
+                                <button
+                                  disabled={suBusyId === su.id}
+                                  onClick={() => deleteStaffUnit(su.id)}
+                                  className="text-xs text-rose-600 hover:text-rose-800 disabled:opacity-40"
+                                >
+                                  видалити
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         ))}

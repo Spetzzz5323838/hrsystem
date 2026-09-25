@@ -3,7 +3,8 @@ import { prisma } from "../../../lib/prisma";
 import { getSessionPerson } from "../../../lib/auth";
 import { canManageOrgStructure } from "../../../lib/permissions";
 import { logAudit } from "../../../lib/audit";
-import { EmploymentStatus } from "../../../generated/prisma/client";
+import { createVacancy } from "../../../lib/vacancies";
+import { EmploymentStatus, VacancyReason } from "../../../generated/prisma/client";
 
 export async function GET(request: NextRequest) {
   const session = await getSessionPerson();
@@ -78,6 +79,9 @@ export async function POST(request: NextRequest) {
     entityId: staffUnit.id,
     diff: { positionProfileId, orgNodeId, plannedHeadcount },
   });
+
+  // Нова посада в штатному розписі — одразу вакансія (з розмови 2026-09-23).
+  await createVacancy(staffUnit.id, VacancyReason.NEW_POSITION, actor?.id ?? null);
 
   return NextResponse.json({ id: staffUnit.id });
 }

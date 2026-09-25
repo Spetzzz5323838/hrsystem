@@ -8,6 +8,8 @@ import { checkSlaEscalations } from "../lib/sla";
 import { runPeriodicBadgeChecks } from "../lib/badges-periodic";
 import { cleanupExpiredDocuments } from "../lib/document-retention";
 import { checkDueReminders } from "../lib/reminders";
+import { listAnnouncementsForPerson } from "../lib/announcements";
+import { castVote, closeExpiredPolls } from "../lib/polls";
 import { acknowledgeReview } from "../lib/review";
 import { approveLoginChallenge, resetCabinetPassword } from "../lib/auth";
 import { checkVacationConflicts, createVacationRequest, type ConflictCheck } from "../lib/vacation";
@@ -116,7 +118,8 @@ bot.command("start", async (ctx) => {
         "Якщо ви вже працюєте в компанії й хочете отримувати сповіщення сюди — напишіть /link.\n" +
         "Щоб подати заявку на відпустку — напишіть /vacation.\n" +
         "Щоб побачити задачі, що очікують вашої дії — напишіть /tasks.\n" +
-        "Щоб скинути пароль кабінету — напишіть /password.",
+        "Щоб скинути пароль кабінету — напишіть /password.\n" +
+        "Щоб побачити оголошення — напишіть /news.",
     );
     return;
   }
@@ -188,6 +191,26 @@ bot.command("tasks", async (ctx) => {
     await ctx.reply(text, {
       reply_markup: { inline_keyboard: [[{ text: buttonText, callback_data: `employee_task_done:${t.taskId}` }]] },
     });
+  }
+});
+
+bot.command("news", async (ctx) => {
+  if (!ctx.from) return;
+
+  const person = await prisma.person.findUnique({ where: { telegramId: BigInt(ctx.from.id) } });
+  if (!person) {
+    await ctx.reply("Спершу прив'яжіть Telegram до вашого акаунта — напишіть /link.");
+    return;
+  }
+
+  const announcements = await listAnnouncementsForPerson(person.id);
+  if (!announcements.length) {
+    await ctx.reply("Оголошень поки немає.");
+    return;
+  }
+
+  for (const a of announcements) {
+    await ctx.reply(`📢 ${a.title}\n\n${a.body}\n\n— ${a.orgNode.name}, ${a.createdAt.toLocaleDateString("uk-UA")}`);
   }
 });
 
@@ -525,6 +548,26 @@ bot.callbackQuery(/^password_reset_confirm:(\d+)$/, async (ctx) => {
   await sendNotificationNow(personId, "auth.cabinetPasswordReset", { password });
 });
 
+bot.callbackQuery(/^poll_vote:(\d+):(\d+)$/, async (ctx) => {
+  const pollId = Number(ctx.match[1]);
+  const optionId = Number(ctx.match[2]);
+
+  const person = await prisma.person.findUnique({ where: { telegramId: BigInt(ctx.from.id) } });
+  if (!person) {
+    await ctx.answerCallbackQuery({ text: "Спершу прив'яжіть Telegram — /link", show_alert: true });
+    return;
+  }
+
+  const result = await castVote(pollId, optionId, person.id);
+  if (!result.ok) {
+    await ctx.answerCallbackQuery({ text: result.error, show_alert: true });
+    return;
+  }
+
+  await ctx.answerCallbackQuery({ text: "Дякуємо, голос зараховано!" });
+  await ctx.editMessageReplyMarkup(undefined).catch(() => {});
+});
+
 // ── Пункти чек-ліста з responsibleRole=EMPLOYEE (docs plan-v1.md §6.1,
 // напр. "Згода на обробку персональних даних") — виконує сам працівник,
 // кнопка приходить push-сповіщенням (lib/onboarding.ts::notifyEmployeeMarkTask)
@@ -560,6 +603,7 @@ const SLA_CHECK_QUEUE = "sla-escalation-check";
 const BADGE_CHECK_QUEUE = "periodic-badge-check";
 const DOCUMENT_RETENTION_QUEUE = "document-retention-cleanup";
 const REMINDER_DUE_QUEUE = "reminder-due-check";
+const POLL_CLOSE_QUEUE = "poll-close-check";
 
 /**
  * Черга й планувальник живуть у процесі бота (не окремим третім
@@ -596,6 +640,10 @@ async function setupQueue() {
   await boss.createQueue(REMINDER_DUE_QUEUE);
   await boss.work(REMINDER_DUE_QUEUE, () => checkDueReminders());
   await boss.schedule(REMINDER_DUE_QUEUE, "0 * * * *"); // щогодини, той самий цикл, що й SLA
+
+  await boss.createQueue(POLL_CLOSE_QUEUE);
+  await boss.work(POLL_CLOSE_QUEUE, () => closeExpiredPolls());
+  await boss.schedule(POLL_CLOSE_QUEUE, "0 * * * *"); // щогодини — закриває опитування з минулим дедлайном
 
   console.log("Черга й заплановані перевірки піднято.");
 }
