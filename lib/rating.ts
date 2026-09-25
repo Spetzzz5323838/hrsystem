@@ -57,7 +57,10 @@ export type CreateRatingEventResult =
 /**
  * Створює подію рейтингу з усіма правилами docs v1.3 §2.1-§2.2:
  * коментар обов'язковий для негативу й номінації, ліміт «одна номінація
- * на місяць на об'єкт», підтвердження бесіди після 2+ негативів за тиждень.
+ * НА КОЖНУ КАТЕГОРІЮ (бейдж) на місяць на об'єкт» (правки 20.09.2026,
+ * п.14 — виправлений баг: раніше ліміт рахувався сумарно по всіх бейджах,
+ * тож перша ж номінація місяця будь-якої категорії блокувала решту чотирьох
+ * для всього об'єкта), підтвердження бесіди після 2+ негативів за тиждень.
  * AUTO-події тут не створюються — для них ще немає тригерів (окремий крок).
  */
 export async function createRatingEvent(input: CreateRatingEventInput): Promise<CreateRatingEventResult> {
@@ -115,16 +118,17 @@ export async function createRatingEvent(input: CreateRatingEventInput): Promise<
       startOfMonth.setUTCDate(1);
       startOfMonth.setUTCHours(0, 0, 0, 0);
 
-      const nominationsThisMonth = await prisma.ratingEvent.count({
+      // BadgeAward — окремий запис без FK на RatingEvent (див. створення
+      // нижче), тож ліміт рахується напряму по ньому, не через RatingEvent.
+      const nominationsThisMonth = await prisma.badgeAward.count({
         where: {
-          type: RatingType.AWARD,
-          cancelledAt: null,
-          occurredAt: { gte: startOfMonth },
+          badgeCode: input.badgeCode,
+          awardedAt: { gte: startOfMonth },
           person: { employments: { some: { staffUnit: { orgNode: { path: objectPath } } } } },
         },
       });
       if (nominationsThisMonth > 0) {
-        return { ok: false, error: "На цей об'єкт уже була номінація цього місяця" };
+        return { ok: false, error: "Ця номінація вже була видана на цей об'єкт цього місяця" };
       }
     }
   }
