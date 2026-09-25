@@ -735,6 +735,10 @@ model Material {
   type         MaterialType
   url          String?
   filePath     String?
+  /// Ім'я й MIME-тип завантаженого файлу (для видачі — Content-Disposition/
+  /// Content-Type) — заповнюються лише для filePath-матеріалів, не для url.
+  originalName String?
+  mimeType     String?
   durationMin  Int?
   sendViaBot   Boolean      @default(false)
 

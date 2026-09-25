@@ -20,8 +20,19 @@ export async function GET() {
   const materials = await prisma.material.findMany({
     where: { competency: { positionCompetencies: { some: { positionProfileId } } } },
     orderBy: { title: "asc" },
-    select: { id: true, title: true, type: true, url: true, durationMin: true, competencyId: true },
+    select: { id: true, title: true, type: true, url: true, filePath: true, durationMin: true, competencyId: true },
   });
 
-  return NextResponse.json({ delta, materials });
+  return NextResponse.json({
+    delta,
+    materials: materials.map((m) => ({
+      id: m.id,
+      title: m.title,
+      type: m.type,
+      url: m.url,
+      hasFile: !!m.filePath,
+      durationMin: m.durationMin,
+      competencyId: m.competencyId,
+    })),
+  });
 }

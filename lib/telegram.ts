@@ -20,6 +20,30 @@ export async function sendTelegramMessage(telegramId: bigint, text: string, repl
 }
 
 /**
+ * Файл матеріалу (PDF, докс plan-v1.md §9.1: "PDF можна й через бот") —
+ * реальний файл із диска сервера, не посилання (спрощення 2026-09-25:
+ * простий користувач більше не пише URL). Той самий принцип "кидає при
+ * збої", що й sendTelegramMessage — виклик тільки всередині pg-boss-воркера.
+ */
+export async function sendTelegramDocument(telegramId: bigint, file: Buffer, filename: string, caption: string): Promise<void> {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) return;
+
+  const form = new FormData();
+  form.append("chat_id", telegramId.toString());
+  form.append("caption", caption);
+  form.append("document", new Blob([new Uint8Array(file)]), filename);
+
+  const response = await fetch(`https://api.telegram.org/bot${token}/sendDocument`, {
+    method: "POST",
+    body: form,
+  });
+  if (!response.ok) {
+    throw new Error(`sendTelegramDocument failed: ${await response.text()}`);
+  }
+}
+
+/**
  * Картинка (штрихкод пароля 1С, docs plan-v1.md §8/§14) з
  * `protect_content: true` — Telegram блокує пересилання й збереження
  * повідомлення. Той самий принцип "кидає при збої", що й sendTelegramMessage

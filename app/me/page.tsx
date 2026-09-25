@@ -81,7 +81,7 @@ type Profile = {
 };
 
 type DeltaRow = { competencyId: number; name: string; state: "valid" | "expired" | "missing"; validUntil: string | null };
-type MaterialRow = { id: number; title: string; type: string; url: string | null; durationMin: number | null };
+type MaterialRow = { id: number; title: string; type: string; url: string | null; hasFile: boolean; durationMin: number | null };
 
 type TaskRow = {
   taskId: number;
@@ -238,20 +238,24 @@ export default function MePage() {
           <div className="px-4 py-8 text-center text-sm text-slate-500">Завантаження…</div>
         ) : (
           <ul className="divide-y divide-slate-100">
-            {materials.map((m) => (
-              <li key={m.id} className="flex items-center justify-between gap-2 px-4 py-2.5 text-sm">
-                <span className="text-slate-800">{m.title}</span>
-                <span className="flex items-center gap-2 text-xs text-slate-500">
-                  {MATERIAL_TYPE_LABELS[m.type] ?? m.type}
-                  {m.durationMin ? ` · ${m.durationMin} хв` : ""}
-                  {m.url && (
-                    <a href={m.url} target="_blank" rel="noreferrer" className="font-medium text-slate-700 underline underline-offset-2">
-                      відкрити
+            {materials.map((m) => {
+              const href = m.url ?? (m.hasFile ? `/api/materials/${m.id}/file` : null);
+              return (
+                <li key={m.id} className="flex items-center justify-between gap-2 px-4 py-2.5 text-sm">
+                  {href ? (
+                    <a href={href} target="_blank" rel="noreferrer" className="font-medium text-slate-800 underline underline-offset-2 hover:text-slate-900">
+                      {m.title}
                     </a>
+                  ) : (
+                    <span className="text-slate-800">{m.title}</span>
                   )}
-                </span>
-              </li>
-            ))}
+                  <span className="flex items-center gap-2 text-xs text-slate-500">
+                    {MATERIAL_TYPE_LABELS[m.type] ?? m.type}
+                    {m.durationMin ? ` · ${m.durationMin} хв` : ""}
+                  </span>
+                </li>
+              );
+            })}
             {!materials.length && <li className="px-4 py-8 text-center text-sm text-slate-500">Матеріалів ще немає.</li>}
           </ul>
         )}

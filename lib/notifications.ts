@@ -5,9 +5,11 @@ import { NotificationStatus } from "../generated/prisma/client";
 
 export const TELEGRAM_MESSAGE_QUEUE = "telegram-message";
 export const ONEC_PASSWORD_DELIVERY_QUEUE = "onec-password-delivery";
+export const MATERIAL_FILE_DELIVERY_QUEUE = "material-file-delivery";
 
 type TelegramMessageJob = { telegramId: string; text: string; replyMarkup?: unknown; notificationId?: number };
 type OnecPasswordDeliveryJob = { employmentId: number };
+type MaterialFileDeliveryJob = { personId: number; materialId: number };
 
 /**
  * Кладе повідомлення в чергу замість прямої відправки — pg-boss дає
@@ -41,6 +43,20 @@ export async function queueOnecPasswordDelivery(employmentId: number): Promise<v
   const boss = await getBoss();
   await boss.createQueue(ONEC_PASSWORD_DELIVERY_QUEUE);
   await boss.send(ONEC_PASSWORD_DELIVERY_QUEUE, { employmentId } satisfies OnecPasswordDeliveryJob, {
+    retryLimit: 5,
+    retryBackoff: true,
+  });
+}
+
+/**
+ * У чергу — лише personId+materialId, файл читається з диска заново
+ * безпосередньо перед відправкою (lib/materials.ts::readMaterialFile,
+ * той самий принцип, що onecPassword — не тримати вміст файлу в черзі).
+ */
+export async function queueMaterialFileDelivery(personId: number, materialId: number): Promise<void> {
+  const boss = await getBoss();
+  await boss.createQueue(MATERIAL_FILE_DELIVERY_QUEUE);
+  await boss.send(MATERIAL_FILE_DELIVERY_QUEUE, { personId, materialId } satisfies MaterialFileDeliveryJob, {
     retryLimit: 5,
     retryBackoff: true,
   });

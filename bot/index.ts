@@ -14,7 +14,8 @@ import { acknowledgeReview } from "../lib/review";
 import { approveLoginChallenge, resetCabinetPassword } from "../lib/auth";
 import { checkVacationConflicts, createVacationRequest, type ConflictCheck } from "../lib/vacation";
 import { deliverOnecPassword } from "../lib/onecPassword";
-import { ONEC_PASSWORD_DELIVERY_QUEUE } from "../lib/notifications";
+import { deliverMaterialFile } from "../lib/materials";
+import { ONEC_PASSWORD_DELIVERY_QUEUE, MATERIAL_FILE_DELIVERY_QUEUE } from "../lib/notifications";
 import { EmploymentStatus, Prisma, Role, VacationType } from "../generated/prisma/client";
 
 const token = process.env.TELEGRAM_BOT_TOKEN;
@@ -627,6 +628,13 @@ async function setupQueue() {
   await boss.work<{ employmentId: number }>(ONEC_PASSWORD_DELIVERY_QUEUE, async (jobs) => {
     for (const job of jobs) {
       await deliverOnecPassword(job.data.employmentId);
+    }
+  });
+
+  await boss.createQueue(MATERIAL_FILE_DELIVERY_QUEUE);
+  await boss.work<{ personId: number; materialId: number }>(MATERIAL_FILE_DELIVERY_QUEUE, async (jobs) => {
+    for (const job of jobs) {
+      await deliverMaterialFile(job.data.personId, job.data.materialId);
     }
   });
 

@@ -6,6 +6,7 @@ import { getCompetencyDelta } from "./competencies";
 import { isCuratorEligibleFor } from "./curator";
 import { hashPassword, generateCabinetPassword } from "./auth";
 import { checkProfileClosedBadge, checkBeyondProfileBadge, checkFastStartBadge, checkMentorBadge } from "./rating";
+import { queueMaterialFileDelivery } from "./notifications";
 import {
   Role,
   ActionType,
@@ -14,6 +15,7 @@ import {
   ProcessType,
   EmploymentStatus,
   CompetencySource,
+  MaterialType,
 } from "../generated/prisma/client";
 
 function addMonths(date: Date, months: number): Date {
@@ -45,6 +47,31 @@ async function getSendableMaterials(positionProfileId: number) {
     where: { sendViaBot: true, competency: { positionCompetencies: { some: { positionProfileId } } } },
     orderBy: { id: "asc" },
   });
+}
+
+type SendableMaterial = Awaited<ReturnType<typeof getSendableMaterials>>[number];
+
+/**
+ * Рядок списку матеріалів у тексті повідомлення — правки 2026-09-25:
+ * файлові матеріали (завантажені на сервер) більше не мають публічного
+ * URL, для PDF файл шлеться окремим повідомленням одразу після (див.
+ * queueSendableMaterialFiles), для відео — лише в кабінеті/інтранеті
+ * (докс: "відео тільки через Wi-Fi інтранет", не через бот).
+ */
+function formatMaterialLine(m: SendableMaterial): string {
+  if (m.url) return `• ${m.title} — ${m.url}`;
+  if (m.filePath && m.type === MaterialType.PDF) return `• ${m.title} (файл нижче)`;
+  if (m.filePath && m.type === MaterialType.VIDEO) return `• ${m.title} (відео — дивіться в кабінеті)`;
+  return `• ${m.title}`;
+}
+
+/** Ставить у чергу доставку файлів (тільки PDF — докс: відео лише інтранет) одразу після текстового списку. */
+async function queueSendableMaterialFiles(personId: number, materials: SendableMaterial[]): Promise<void> {
+  for (const m of materials) {
+    if (m.filePath && m.type === MaterialType.PDF) {
+      await queueMaterialFileDelivery(personId, m.id);
+    }
+  }
 }
 
 /**
@@ -81,8 +108,9 @@ async function notifyEmployeeMarkTask(task: {
   if (task.itemTemplate.title === MATERIALS_ACK_TASK_TITLE) {
     const materials = await getSendableMaterials(assignee.staffUnit.positionProfileId);
     if (materials.length) {
-      const lines = materials.map((m) => `• ${m.title}${m.url ? ` — ${m.url}` : ""}`);
+      const lines = materials.map(formatMaterialLine);
       await sendNotification(assignee.personId, "onboarding.materialsAcknowledgeRequest", { materialsList: lines.join("\n") }, replyMarkup);
+      await queueSendableMaterialFiles(assignee.personId, materials);
       return;
     }
   }
@@ -156,8 +184,9 @@ async function sendOnboardingMaterials(employment: { personId: number; staffUnit
   const materials = await getSendableMaterials(employment.staffUnit.positionProfileId);
   if (!materials.length) return;
 
-  const lines = materials.map((m) => `• ${m.title}${m.url ? ` — ${m.url}` : ""}`);
+  const lines = materials.map(formatMaterialLine);
   await sendNotification(employment.personId, "onboarding.welcomeMaterials", { materialsList: lines.join("\n") });
+  await queueSendableMaterialFiles(employment.personId, materials);
 }
 
 export async function startOnboarding(employmentId: number): Promise<{ instanceId: number; alreadyExisted: boolean }> {
@@ -268,7 +297,7 @@ export async function getMyPendingEmployeeMarkTasks(personId: number): Promise<{
       const positionProfileId = positionByEmploymentId.get(t.assigneeId);
       if (positionProfileId != null) {
         const materials = await getSendableMaterials(positionProfileId);
-        if (materials.length) materialsList = materials.map((m) => `• ${m.title}${m.url ? ` — ${m.url}` : ""}`).join("\n");
+        if (materials.length) materialsList = materials.map(formatMaterialLine).join("\n");
       }
     }
 

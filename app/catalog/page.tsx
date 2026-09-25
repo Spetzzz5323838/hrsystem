@@ -54,6 +54,7 @@ type MaterialRow = {
   competencyId: number;
   competencyName: string;
   url: string | null;
+  hasFile: boolean;
   durationMin: number | null;
   sendViaBot: boolean;
 };
@@ -355,12 +356,17 @@ export default function CatalogPage() {
   };
 
   // ── Матеріали: додавання/редагування/видалення ──
+  // Правки 2026-09-25: PDF/відео завантажуються файлом на диск сервера
+  // (реальне завантаження, не URL) — простіше для нетехнічного користувача.
+  // "Посилання" лишається URL-полем для зовнішнього ресурсу.
   const [matFormOpen, setMatFormOpen] = useState(false);
   const [editingMatId, setEditingMatId] = useState<number | null>(null);
   const [matTitle, setMatTitle] = useState("");
   const [matType, setMatType] = useState<"PDF" | "VIDEO" | "LINK">("PDF");
   const [matCompetencyId, setMatCompetencyId] = useState("");
   const [matUrl, setMatUrl] = useState("");
+  const [matFile, setMatFile] = useState<File | null>(null);
+  const [matHasFile, setMatHasFile] = useState(false);
   const [matDuration, setMatDuration] = useState("");
   const [matSendViaBot, setMatSendViaBot] = useState(false);
   const [matError, setMatError] = useState<string | null>(null);
@@ -373,6 +379,8 @@ export default function CatalogPage() {
     setMatType("PDF");
     setMatCompetencyId("");
     setMatUrl("");
+    setMatFile(null);
+    setMatHasFile(false);
     setMatDuration("");
     setMatSendViaBot(false);
     setMatError(null);
@@ -385,6 +393,8 @@ export default function CatalogPage() {
     setMatType(m.type);
     setMatCompetencyId(String(m.competencyId));
     setMatUrl(m.url ?? "");
+    setMatFile(null);
+    setMatHasFile(m.hasFile);
     setMatDuration(m.durationMin != null ? String(m.durationMin) : "");
     setMatSendViaBot(m.sendViaBot);
     setMatError(null);
@@ -392,10 +402,38 @@ export default function CatalogPage() {
 
   const submitMaterial = () => {
     setMatSubmitting(true);
-    const url = editingMatId ? `/api/materials/${editingMatId}` : "/api/materials";
+    setMatError(null);
+    const endpoint = editingMatId ? `/api/materials/${editingMatId}` : "/api/materials";
+
+    const finish = (promise: Promise<Response>) =>
+      promise
+        .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
+        .then(({ ok, body }) => {
+          if (!ok) throw new Error(body.error ?? "Не вдалося зберегти матеріал");
+          resetMatForm();
+          loadCatalog();
+        })
+        .catch((e) => setMatError(e.message))
+        .finally(() => setMatSubmitting(false));
+
+    if (matType !== "LINK" && matFile) {
+      // Завантаження нового файлу (створення) або заміна наявного (редагування).
+      const form = new FormData();
+      form.append("file", matFile);
+      if (!editingMatId) {
+        form.append("title", matTitle.trim());
+        form.append("type", matType);
+        form.append("competencyId", matCompetencyId);
+        if (matDuration) form.append("durationMin", matDuration);
+        form.append("sendViaBot", String(matSendViaBot));
+      }
+      finish(fetch(endpoint, { method: editingMatId ? "PATCH" : "POST", body: form }));
+      return;
+    }
+
+    // Посилання (LINK), або редагування метаданих файлового матеріалу без заміни файлу.
     const payload: Record<string, unknown> = {
       title: matTitle.trim(),
-      url: matUrl.trim() || null,
       durationMin: matDuration ? Number(matDuration) : null,
       sendViaBot: matSendViaBot,
       // Тип можна міняти і при редагуванні (правки 20.09.2026, п.9) — контент
@@ -404,22 +442,16 @@ export default function CatalogPage() {
       // навчання-компетенція.
       type: matType,
     };
-    if (!editingMatId) {
-      payload.competencyId = Number(matCompetencyId);
-    }
-    fetch(url, {
-      method: editingMatId ? "PATCH" : "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    })
-      .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
-      .then(({ ok, body }) => {
-        if (!ok) throw new Error(body.error ?? "Не вдалося зберегти матеріал");
-        resetMatForm();
-        loadCatalog();
-      })
-      .catch((e) => setMatError(e.message))
-      .finally(() => setMatSubmitting(false));
+    if (matType === "LINK") payload.url = matUrl.trim() || null;
+    if (!editingMatId) payload.competencyId = Number(matCompetencyId);
+
+    finish(
+      fetch(endpoint, {
+        method: editingMatId ? "PATCH" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }),
+    );
   };
 
   const deleteMaterial = (id: number) => {
@@ -1006,12 +1038,24 @@ export default function CatalogPage() {
                       </option>
                     ))}
                   </select>
-                  <input
-                    value={matUrl}
-                    onChange={(e) => setMatUrl(e.target.value)}
-                    placeholder="URL (необов'язково)"
-                    className="w-64 rounded border border-slate-300 px-2 py-1.5 text-sm"
-                  />
+                  {matType === "LINK" ? (
+                    <input
+                      value={matUrl}
+                      onChange={(e) => setMatUrl(e.target.value)}
+                      placeholder="Посилання на матеріал (https://...)"
+                      className="w-64 rounded border border-slate-300 px-2 py-1.5 text-sm"
+                    />
+                  ) : (
+                    <label className="flex items-center gap-2 text-sm text-slate-700">
+                      <input
+                        type="file"
+                        accept={matType === "PDF" ? "application/pdf" : "video/mp4,video/webm,video/quicktime"}
+                        onChange={(e) => setMatFile(e.target.files?.[0] ?? null)}
+                        className="text-sm"
+                      />
+                      {matHasFile && !matFile && <span className="text-xs text-slate-400">файл уже є — обери новий, щоб замінити</span>}
+                    </label>
+                  )}
                   <input
                     value={matDuration}
                     onChange={(e) => setMatDuration(e.target.value)}
@@ -1019,15 +1063,25 @@ export default function CatalogPage() {
                     type="number"
                     className="w-36 rounded border border-slate-300 px-2 py-1.5 text-sm"
                   />
-                  <label className="flex items-center gap-1.5 text-sm text-slate-700">
-                    <input type="checkbox" checked={matSendViaBot} onChange={(e) => setMatSendViaBot(e.target.checked)} />
-                    надсилати ботом
-                  </label>
+                  {matType !== "VIDEO" && (
+                    <label className="flex items-center gap-1.5 text-sm text-slate-700">
+                      <input type="checkbox" checked={matSendViaBot} onChange={(e) => setMatSendViaBot(e.target.checked)} />
+                      надсилати ботом
+                    </label>
+                  )}
                 </div>
+                {matType === "VIDEO" && (
+                  <p className="text-xs text-slate-400">Відео надсилається лише через кабінет/інтранет, не через бот.</p>
+                )}
                 {matError && <p className="text-sm text-rose-700">{matError}</p>}
                 <button
                   onClick={submitMaterial}
-                  disabled={!matTitle.trim() || (!editingMatId && !matCompetencyId) || matSubmitting}
+                  disabled={
+                    !matTitle.trim() ||
+                    (!editingMatId && !matCompetencyId) ||
+                    (matType !== "LINK" && !editingMatId && !matFile) ||
+                    matSubmitting
+                  }
                   className="rounded bg-slate-900 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
                 >
                   {editingMatId ? "Зберегти" : "Створити"}
@@ -1045,9 +1099,19 @@ export default function CatalogPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {materials.map((m) => (
+                {materials.map((m) => {
+                  const href = m.url ?? (m.hasFile ? `/api/materials/${m.id}/file` : null);
+                  return (
                   <tr key={m.id}>
-                    <td className="px-4 py-2 text-slate-800">{m.title}</td>
+                    <td className="px-4 py-2 text-slate-800">
+                      {href ? (
+                        <a href={href} target="_blank" rel="noreferrer" className="text-slate-800 underline underline-offset-2 hover:text-slate-900">
+                          {m.title}
+                        </a>
+                      ) : (
+                        m.title
+                      )}
+                    </td>
                     <td className="px-4 py-2 text-slate-600">{m.type === "PDF" ? "PDF" : m.type === "VIDEO" ? "Відео" : "Посилання"}</td>
                     <td className="px-4 py-2 text-slate-600">{m.competencyName}</td>
                     <td className="px-4 py-2 text-right">
@@ -1072,7 +1136,8 @@ export default function CatalogPage() {
                       </td>
                     )}
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </Section>
