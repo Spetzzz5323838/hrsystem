@@ -13,7 +13,7 @@ export async function GET() {
 
   const materials = await prisma.material.findMany({
     orderBy: { title: "asc" },
-    include: { competency: { select: { name: true } } },
+    include: { competency: { select: { name: true } }, contentUpdatedBy: { include: { person: { select: { fullName: true } } } } },
   });
 
   return NextResponse.json(
@@ -27,6 +27,8 @@ export async function GET() {
       hasFile: !!m.filePath,
       durationMin: m.durationMin,
       sendViaBot: m.sendViaBot,
+      contentUpdatedAt: m.contentUpdatedAt,
+      contentUpdatedByName: m.contentUpdatedBy?.person.fullName ?? null,
     })),
   );
 }

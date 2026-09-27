@@ -2,6 +2,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { prisma } from "./prisma";
 import { sendTelegramDocument } from "./telegram";
+import { logAudit } from "./audit";
 import { MaterialType } from "../generated/prisma/client";
 
 // Файли матеріалів — поза `public/`, як і скани документів (не роздаються
@@ -61,8 +62,14 @@ export async function saveMaterialFile(input: SaveMaterialFileInput): Promise<{ 
   return { ok: true, id: material.id };
 }
 
-/** Заміна файлу вже наявного матеріалу — старий видаляється з диска, шлях/метадані оновлюються на місці. */
-export async function replaceMaterialFile(materialId: number, file: File): Promise<{ ok: true } | { ok: false; error: string }> {
+/**
+ * Заміна файлу вже наявного матеріалу — старий видаляється з диска
+ * фізично (легкий журнал, 2026-09-27: сам вміст старої версії не
+ * зберігається, лише хто/коли замінив — Material.contentUpdatedAt/
+ * contentUpdatedById для швидкої позначки в списку + повний AuditLog
+ * на кожну заміну для тих, кому потрібна історія).
+ */
+export async function replaceMaterialFile(materialId: number, file: File, actorId: number): Promise<{ ok: true } | { ok: false; error: string }> {
   const existing = await prisma.material.findUnique({ where: { id: materialId } });
   if (!existing) return { ok: false, error: "Матеріал не знайдено" };
 
@@ -81,13 +88,22 @@ export async function replaceMaterialFile(materialId: number, file: File): Promi
 
   if (existing.filePath) await fs.rm(existing.filePath, { force: true });
 
+  const now = new Date();
   // url теж обнуляємо — файл, що реально є на диску, завжди має пріоритет
   // (знайдений баг: старий url типу "\\сервер\Support\..." лишався в базі
   // від ручного редагування до появи завантаження файлів і "затуляв"
   // клікабельне посилання на щойно завантажений робочий файл).
   await prisma.material.update({
     where: { id: materialId },
-    data: { filePath, originalName: file.name, mimeType: file.type, url: null },
+    data: { filePath, originalName: file.name, mimeType: file.type, url: null, contentUpdatedAt: now, contentUpdatedById: actorId },
+  });
+
+  await logAudit({
+    actorId,
+    action: "material.contentReplaced",
+    entityType: "Material",
+    entityId: materialId,
+    diff: { oldOriginalName: existing.originalName, newOriginalName: file.name },
   });
 
   return { ok: true };

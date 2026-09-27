@@ -115,6 +115,8 @@ type MaterialRow = {
   hasFile: boolean;
   durationMin: number | null;
   sendViaBot: boolean;
+  contentUpdatedAt: string | null;
+  contentUpdatedByName: string | null;
 };
 
 // Дзеркалить lib/review.ts::REVIEW_CRITERION_LABELS — той файл тягне за
@@ -156,7 +158,10 @@ export default function CatalogPage() {
     field: "name",
     dir: "asc",
   });
-  const [matSort, setMatSort] = useState<SortState<"title" | "type" | "competencyName" | "sendViaBot">>({ field: "title", dir: "asc" });
+  const [matSort, setMatSort] = useState<SortState<"title" | "type" | "competencyName" | "sendViaBot" | "contentUpdatedAt">>({
+    field: "title",
+    dir: "asc",
+  });
 
   const loadCatalog = () => {
     Promise.all([
@@ -1212,6 +1217,7 @@ export default function CatalogPage() {
                   <SortTh label="Тип" field="type" sort={matSort} onSort={(f) => setMatSort((s) => toggleSort(s, f))} />
                   <SortTh label="Компетенція" field="competencyName" sort={matSort} onSort={(f) => setMatSort((s) => toggleSort(s, f))} />
                   <SortTh label="Канал" field="sendViaBot" sort={matSort} onSort={(f) => setMatSort((s) => toggleSort(s, f))} align="right" />
+                  <SortTh label="Оновлено" field="contentUpdatedAt" sort={matSort} onSort={(f) => setMatSort((s) => toggleSort(s, f))} />
                   {canEdit && <th className="px-4 py-2" />}
                 </tr>
               </thead>
@@ -1244,6 +1250,15 @@ export default function CatalogPage() {
                       >
                         {m.sendViaBot ? "бот" : "intranet"}
                       </span>
+                    </td>
+                    <td className="px-4 py-2 text-slate-500">
+                      {m.contentUpdatedAt ? (
+                        <span title={m.contentUpdatedByName ? `Замінив(ла): ${m.contentUpdatedByName}` : undefined}>
+                          {new Date(m.contentUpdatedAt).toLocaleDateString("uk-UA")}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-slate-400">—</span>
+                      )}
                     </td>
                     {canEdit && (
                       <td className="px-4 py-2 text-right">

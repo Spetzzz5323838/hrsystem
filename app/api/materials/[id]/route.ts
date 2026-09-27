@@ -3,7 +3,8 @@ import { prisma } from "../../../../lib/prisma";
 import { getSessionPerson } from "../../../../lib/auth";
 import { canManageCatalog } from "../../../../lib/permissions";
 import { replaceMaterialFile, deleteMaterialFile } from "../../../../lib/materials";
-import { MaterialType } from "../../../../generated/prisma/client";
+import { logAudit } from "../../../../lib/audit";
+import { MaterialType, EmploymentStatus } from "../../../../generated/prisma/client";
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const person = await getSessionPerson();
@@ -26,7 +27,10 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     const file = form.get("file");
     if (!(file instanceof File) || file.size === 0) return NextResponse.json({ error: "Потрібен файл" }, { status: 400 });
 
-    const result = await replaceMaterialFile(materialId, file);
+    const actor = await prisma.employment.findFirst({ where: { personId: person.id, status: { not: EmploymentStatus.TERMINATED } } });
+    if (!actor) return NextResponse.json({ error: "Не знайдено активне працевлаштування" }, { status: 400 });
+
+    const result = await replaceMaterialFile(materialId, file, actor.id);
     if (!result.ok) return NextResponse.json({ error: result.error }, { status: 400 });
     return NextResponse.json({ id: materialId });
   }
@@ -75,5 +79,9 @@ export async function DELETE(_request: NextRequest, { params }: { params: Promis
 
   if (material.filePath) await deleteMaterialFile(material.filePath);
   await prisma.material.delete({ where: { id: materialId } });
+
+  const actor = await prisma.employment.findFirst({ where: { personId: person.id, status: { not: EmploymentStatus.TERMINATED } } });
+  await logAudit({ actorId: actor?.id ?? null, action: "material.deleted", entityType: "Material", entityId: materialId, diff: { title: material.title } });
+
   return NextResponse.json({ ok: true });
 }

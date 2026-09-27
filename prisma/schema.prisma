@@ -403,6 +403,7 @@ model Employment {
   awardedBadges               BadgeAward[]         @relation("BadgeAwardedBy")
   clearanceSheets             ClearanceSheet[]
   uploadedDocuments           Document[]
+  updatedMaterials            Material[]           @relation("MaterialContentUpdatedBy")
   responsibleEquipment        Equipment[]
   equipmentEvents             EquipmentEvent[]     @relation("EquipmentEventEmployment")
   performedEquipmentEvents    EquipmentEvent[]     @relation("EquipmentEventPerformedBy")
@@ -745,6 +746,13 @@ model Material {
   mimeType     String?
   durationMin  Int?
   sendViaBot   Boolean      @default(false)
+  /// Легкий журнал версій (2026-09-27) — не зберігає самі старі файли
+  /// (замінюються фізично, lib/materials.ts::replaceMaterialFile), лише
+  /// коли й ким востаннє замінено вміст; null = від створення не замінювали.
+  /// Повна історія замін — AuditLog(entityType="Material", action="material.contentReplaced").
+  contentUpdatedAt   DateTime?
+  contentUpdatedById Int?
+  contentUpdatedBy   Employment? @relation("MaterialContentUpdatedBy", fields: [contentUpdatedById], references: [id])
 
   @@index([competencyId])
 }
