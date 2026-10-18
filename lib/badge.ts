@@ -3,7 +3,7 @@ import path from "node:path";
 import Handlebars from "handlebars";
 import puppeteer from "puppeteer";
 import { prisma } from "./prisma";
-import { decryptSecret } from "./crypto";
+import { ensureBadgeCode } from "./badgeCode";
 import { generateBarcodePng } from "./barcode";
 
 let compiledTemplate: HandlebarsTemplateDelegate | null = null;
@@ -18,12 +18,11 @@ async function getBadgeTemplate(): Promise<HandlebarsTemplateDelegate> {
 
 /**
  * Бейдж-перепустка (docs catalogs-v1.1.md §6.1, п.10 "Видача бейджа,
- * спецодягу, ключів") — ПІБ+посада+об'єкт+штрихкод коду 1С, БЕЗ фото
- * (правки 20.09.2026, п.5 — фото лишається лише в профілі працівника).
- * Штрихкод — той самий код, що видає оператор 1С (Employment.onecPasswordCipher);
- * користувач уточнив 2026-09-22, що це не секрет входу, а персональний
- * ID-код для обліку робочого часу, тож друкувати його можна — але без
- * видимих цифр під смугами (лише скан), див. lib/barcode.ts.
+ * спецодягу, ключів") — ПІБ+посада+об'єкт+штрихкод коду працівника, БЕЗ
+ * фото (правки 20.09.2026, п.5 — фото лишається лише в профілі працівника).
+ * Штрихкод — Person.badgeCode (генерує система, 2026-10-18): не секрет,
+ * а ID для обліку робочого часу; друкується без видимих цифр під смугами
+ * (lib/barcode.ts). Пароль до каси на бейдж НЕ йде.
  * Ніде не зберігається — генерується наживо щоразу, на відміну від
  * листа узгодження (тому й нема окремого номера/audit trail на кожен друк).
  */
@@ -34,12 +33,12 @@ export async function generateBadgePdf(employmentId: number): Promise<Buffer | n
   });
   if (!employment) return null;
 
-  let barcodeDataUri: string | null = null;
-  if (employment.onecPasswordCipher) {
-    const code = decryptSecret(employment.onecPasswordCipher);
-    const png = await generateBarcodePng(code, { includeText: false });
-    barcodeDataUri = `data:image/png;base64,${png.toString("base64")}`;
-  }
+  // Код працівника (не пароль до каси — той секретний і на бейдж не йде,
+  // рішення 2026-10-18). ensureBadgeCode — на випадок людини, якій код ще
+  // не видали (напр. прийнята до появи генератора).
+  const code = await ensureBadgeCode(employment.personId);
+  const png = await generateBarcodePng(code, { includeText: false });
+  const barcodeDataUri = `data:image/png;base64,${png.toString("base64")}`;
 
   const template = await getBadgeTemplate();
   const html = template({

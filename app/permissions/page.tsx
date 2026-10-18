@@ -27,7 +27,7 @@ const CAPABILITY_LABELS: Record<string, string> = {
   ASSIGN_CURATOR: "Призначення куратора",
   VIEW_DOCUMENTS: "Перегляд сканів документів",
   UPLOAD_DOCUMENTS: "Завантаження документів",
-  SET_1C_PASSWORD: "Видача пароля 1С",
+  SET_1C_PASSWORD: "Перевидача пароля до каси",
   CLOSE_INTERNSHIP: "Закриття стажування",
   RUN_ATTESTATION: "Приймання атестації",
   RATE_POSITIVE_NEGATIVE: "Оцінка позитив/негатив",

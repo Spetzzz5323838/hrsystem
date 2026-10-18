@@ -13,9 +13,9 @@ import { castVote, closeExpiredPolls } from "../lib/polls";
 import { acknowledgeReview } from "../lib/review";
 import { approveLoginChallenge, resetCabinetPassword } from "../lib/auth";
 import { checkVacationConflicts, createVacationRequest, type ConflictCheck } from "../lib/vacation";
-import { deliverOnecPassword } from "../lib/onecPassword";
+import { deliverPosPassword } from "../lib/posPassword";
 import { deliverMaterialFile } from "../lib/materials";
-import { ONEC_PASSWORD_DELIVERY_QUEUE, MATERIAL_FILE_DELIVERY_QUEUE } from "../lib/notifications";
+import { POS_PASSWORD_DELIVERY_QUEUE, MATERIAL_FILE_DELIVERY_QUEUE } from "../lib/notifications";
 import { EmploymentStatus, Prisma, Role, VacationType } from "../generated/prisma/client";
 
 const token = process.env.TELEGRAM_BOT_TOKEN;
@@ -624,10 +624,10 @@ async function setupQueue() {
   await boss.work(BADGE_CHECK_QUEUE, () => runPeriodicBadgeChecks());
   await boss.schedule(BADGE_CHECK_QUEUE, "0 3 * * *"); // раз на добу о 3:00
 
-  await boss.createQueue(ONEC_PASSWORD_DELIVERY_QUEUE);
-  await boss.work<{ employmentId: number }>(ONEC_PASSWORD_DELIVERY_QUEUE, async (jobs) => {
+  await boss.createQueue(POS_PASSWORD_DELIVERY_QUEUE);
+  await boss.work<{ employmentId: number }>(POS_PASSWORD_DELIVERY_QUEUE, async (jobs) => {
     for (const job of jobs) {
-      await deliverOnecPassword(job.data.employmentId);
+      await deliverPosPassword(job.data.employmentId);
     }
   });
 

@@ -4,11 +4,11 @@ import { sendTelegramMessage } from "./telegram";
 import { NotificationStatus } from "../generated/prisma/client";
 
 export const TELEGRAM_MESSAGE_QUEUE = "telegram-message";
-export const ONEC_PASSWORD_DELIVERY_QUEUE = "onec-password-delivery";
+export const POS_PASSWORD_DELIVERY_QUEUE = "pos-password-delivery";
 export const MATERIAL_FILE_DELIVERY_QUEUE = "material-file-delivery";
 
 type TelegramMessageJob = { telegramId: string; text: string; replyMarkup?: unknown; notificationId?: number };
-type OnecPasswordDeliveryJob = { employmentId: number };
+type PosPasswordDeliveryJob = { employmentId: number };
 type MaterialFileDeliveryJob = { personId: number; materialId: number };
 
 /**
@@ -35,14 +35,14 @@ export async function queueTelegramMessage(telegramId: bigint, text: string, rep
 /**
  * У чергу кладеться лише employmentId, не сам пароль і не готова картинка
  * — розшифрування й генерація штрихкода відбуваються заново в
- * lib/onecPassword.ts::deliverOnecPassword, безпосередньо перед
+ * lib/posPassword.ts::deliverPosPassword, безпосередньо перед
  * відправкою (воркер зареєстрований у bot/index.ts, бо там же й
  * Bot API — той самий принцип, що й для щоденних перевірок бейджів/SLA).
  */
-export async function queueOnecPasswordDelivery(employmentId: number): Promise<void> {
+export async function queuePosPasswordDelivery(employmentId: number): Promise<void> {
   const boss = await getBoss();
-  await boss.createQueue(ONEC_PASSWORD_DELIVERY_QUEUE);
-  await boss.send(ONEC_PASSWORD_DELIVERY_QUEUE, { employmentId } satisfies OnecPasswordDeliveryJob, {
+  await boss.createQueue(POS_PASSWORD_DELIVERY_QUEUE);
+  await boss.send(POS_PASSWORD_DELIVERY_QUEUE, { employmentId } satisfies PosPasswordDeliveryJob, {
     retryLimit: 5,
     retryBackoff: true,
   });
@@ -51,7 +51,7 @@ export async function queueOnecPasswordDelivery(employmentId: number): Promise<v
 /**
  * У чергу — лише personId+materialId, файл читається з диска заново
  * безпосередньо перед відправкою (lib/materials.ts::readMaterialFile,
- * той самий принцип, що onecPassword — не тримати вміст файлу в черзі).
+ * той самий принцип, що пароль до каси — не тримати вміст файлу в черзі).
  */
 export async function queueMaterialFileDelivery(personId: number, materialId: number): Promise<void> {
   const boss = await getBoss();

@@ -4,7 +4,7 @@ import { getSessionPerson } from "../../../../../lib/auth";
 import { completeTask, completeCuratorAssignmentTask } from "../../../../../lib/onboarding";
 import { completeTransferTask } from "../../../../../lib/transfer";
 import { completeTerminationTask } from "../../../../../lib/termination";
-import { setOnecPassword } from "../../../../../lib/onecPassword";
+import { CREDENTIALS_STEP_TITLES, completeCredentialsTask } from "../../../../../lib/posPassword";
 import { ProcessType } from "../../../../../generated/prisma/client";
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -38,10 +38,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       return NextResponse.json({ error: "Потрібно обрати куратора" }, { status: 400 });
     }
     result = await completeCuratorAssignmentTask(taskId, curatorEmploymentId, task.assignee.id);
-  } else if (task.itemTemplate.title === "Реєстрація в 1С, генерація пароля") {
-    const onecPassword = typeof body?.onecPassword === "string" ? body.onecPassword : "";
-    if (!onecPassword.trim()) return NextResponse.json({ error: "Потрібно ввести пароль з 1С" }, { status: 400 });
-    result = await setOnecPassword(taskId, onecPassword, task.assignee.id);
+  } else if (CREDENTIALS_STEP_TITLES.includes(task.itemTemplate.title)) {
+    // Старий крок "Реєстрація в 1С" у вже запущених онбордингах: пароль
+    // більше не вводиться — система генерує його сама (2026-10-18).
+    result = await completeCredentialsTask(taskId, task.assignee.id);
   } else if (task.instance.template.type === ProcessType.TRANSFER) {
     result = await completeTransferTask(taskId, task.assignee.id);
   } else if (task.instance.template.type === ProcessType.OFFBOARDING) {

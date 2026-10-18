@@ -121,7 +121,7 @@ export async function deleteMaterialFile(filePath: string): Promise<void> {
  * Воркер черги MATERIAL_FILE_DELIVERY_QUEUE (bot/index.ts) — файл
  * читається з диска заново, ніде не кешується. Мовчки виходить, якщо
  * матеріал/файл/telegramId людини вже не існують (той самий принцип, що
- * deliverOnecPassword) — і якщо тип відео (докс: лише інтранет, не бот),
+ * deliverPosPassword) — і якщо тип відео (докс: лише інтранет, не бот),
  * бо isRequired-перевірка sendViaBot=false для VIDEO вже стоїть на
  * збереженні, це остання лінія захисту про всяк випадок.
  */

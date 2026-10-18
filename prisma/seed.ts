@@ -1,5 +1,6 @@
 import { prisma } from "../lib/prisma";
 import { hashPassword } from "../lib/auth";
+import { ensureBadgeCode } from "../lib/badgeCode";
 import {
   OrgNodeType,
   Role,
@@ -727,7 +728,9 @@ const baseChecklistItems: ChecklistItemSeed[] = [
   { order: 2, title: "Згода на обробку персональних даних", responsibleRole: Role.EMPLOYEE, actionType: ActionType.MARK, isBlocking: true, slaHours: 24, module: null },
   { order: 3, title: "Заповнення профілю: посада, відділ, дата виходу", responsibleRole: Role.STORE_ADMIN, actionType: ActionType.INPUT_VALUE, isBlocking: true, slaHours: 24, module: null },
   { order: 4, title: "Призначення куратора", responsibleRole: Role.STORE_ADMIN, actionType: ActionType.INPUT_VALUE, isBlocking: true, slaHours: 24, module: null },
-  { order: 5, title: "Реєстрація в 1С, генерація пароля", responsibleRole: Role.ONEC_ADMIN, actionType: ActionType.INPUT_VALUE, isBlocking: true, slaHours: 24, module: null },
+  // 2026-10-18: код працівника й пароль до каси генерує система (lib/posPassword.ts),
+  // оператор 1С більше нічого вручну не вводить — крок автоматичний.
+  { order: 5, title: "Генерація коду працівника і пароля до каси", responsibleRole: null, actionType: ActionType.AUTO, isBlocking: true, slaHours: 0, module: null },
   { order: 6, title: "Прийом і сканування документів", responsibleRole: Role.ACCOUNTANT, actionType: ActionType.UPLOAD, isBlocking: true, slaHours: 72, module: null },
   { order: 7, title: "Оформлення прийому (заява, наказ)", responsibleRole: Role.ACCOUNTANT, actionType: ActionType.MARK, isBlocking: true, slaHours: 72, module: null },
   // order 8, не серед модульних (правки 20.09.2026, п.9): виконує бухгалтер
@@ -1366,6 +1369,14 @@ async function main() {
 
   console.log("Шаблони сповіщень...");
   await seedNotificationTemplates();
+
+  // Код працівника для бейджа й обліку часу — усім, у кого його ще немає
+  // (ідемпотентно). Пароль до каси тут НЕ генеруємо: він одразу йде
+  // доставкою в Telegram, це дія для живих працівників, не для seed.
+  console.log("Коди працівників...");
+  for (const p of await prisma.person.findMany({ where: { badgeCode: null }, select: { id: true } })) {
+    await ensureBadgeCode(p.id);
+  }
 
   console.log("Готово.");
 }

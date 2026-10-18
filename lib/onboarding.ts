@@ -7,6 +7,7 @@ import { isCuratorEligibleFor } from "./curator";
 import { hashPassword, generateCabinetPassword } from "./auth";
 import { checkProfileClosedBadge, checkBeyondProfileBadge, checkFastStartBadge, checkMentorBadge } from "./rating";
 import { queueMaterialFileDelivery } from "./notifications";
+import { CREDENTIALS_STEP_TITLES, issueOnboardingCredentials } from "./posPassword";
 import {
   Role,
   ActionType,
@@ -229,8 +230,14 @@ export async function startOnboarding(employmentId: number): Promise<{ instanceI
     if (item.actionType === ActionType.AUTO) {
       status = TaskStatus.DONE;
       completedAt = now;
-      if (item.order === 11) {
+      // За назвою, не за order: після перенесення пункту МВО (вересень)
+      // welcomebook став order 12, а перевірка "order === 11" мовчки
+      // перестала надсилати матеріали новим людям.
+      if (item.title === "Надсилання welcomebook і матеріалів LMS") {
         await sendOnboardingMaterials(employment);
+      }
+      if (CREDENTIALS_STEP_TITLES.includes(item.title)) {
+        await issueOnboardingCredentials(employment.id, null);
       }
     } else if (item.responsibleRole === Role.EMPLOYEE) {
       assigneeId = employment.id;

@@ -71,6 +71,13 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
     terminatedAt: employment.terminatedAt,
     curatorName: employment.curator?.person.fullName ?? null,
     staffUnitId: employment.staffUnitId,
+    // Код бейджа — не секрет (ID для обліку часу), показуємо, щоб адмін міг
+    // ввести його вручну, якщо сканер не працює. Сам пароль до каси — ніколи,
+    // лише факт і дата видачі.
+    badgeCode: employment.person.badgeCode,
+    badgeCodeIssuedAt: employment.person.badgeCodeIssuedAt,
+    requiresCashierAccount: employment.staffUnit.positionProfile.requiresCashierAccount,
+    posPasswordSetAt: employment.posPasswordSetAt,
     competencies,
     bonusCompetencies,
   });
