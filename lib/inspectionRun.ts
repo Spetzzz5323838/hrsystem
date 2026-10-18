@@ -3,6 +3,7 @@ import path from "node:path";
 import { prisma } from "./prisma";
 import { logAudit } from "./audit";
 import { getSessionPerson } from "./auth";
+import { createViolationsForInspection } from "./violations";
 import { can } from "./permissions";
 import { Capability, EmploymentStatus, InspectionKind, InspectionRating, InspectionStatus, RegulationTarget } from "../generated/prisma/client";
 
@@ -205,7 +206,7 @@ export async function readPhoto(resultId: number): Promise<{ buffer: Buffer; mim
 }
 
 /** Завершення: усі вимоги мають бути оцінені. Зв'язок із порушеннями й рейтингом — етап 8. */
-export async function completeInspection(inspectionId: number, actorEmploymentId: number): Promise<{ ok: true } | { ok: false; error: string }> {
+export async function completeInspection(inspectionId: number, actorEmploymentId: number): Promise<{ ok: true; violations: number } | { ok: false; error: string }> {
   const inspection = await prisma.inspection.findUnique({ where: { id: inspectionId } });
   if (!inspection || inspection.status !== InspectionStatus.IN_PROGRESS) return { ok: false, error: "Обхід не розпочато або вже завершено" };
 
@@ -215,7 +216,8 @@ export async function completeInspection(inspectionId: number, actorEmploymentId
 
   await prisma.inspection.update({ where: { id: inspectionId }, data: { status: InspectionStatus.COMPLETED, completedAt: new Date() } });
   await logAudit({ actorId: actorEmploymentId, action: "inspection.completed", entityType: "Inspection", entityId: inspectionId });
-  return { ok: true };
+  const violations = await createViolationsForInspection(inspectionId, actorEmploymentId);
+  return { ok: true, violations };
 }
 
 /** Єдина перевірка для роутів обходу: залогований + має CONDUCT_INSPECTION на магазин обходу. */

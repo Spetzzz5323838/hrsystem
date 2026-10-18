@@ -260,6 +260,7 @@ model OrgNode {
   staffingCheckedOn DateTime?      @db.Date
   announcements     Announcement[]
   polls             Poll[]
+  violations        Violation[]
 
   @@index([path])
 }
@@ -461,6 +462,9 @@ model Employment {
   closedVacancies             Vacancy[]            @relation("VacancyClosedBy")
   authoredAnnouncements       Announcement[]       @relation("AnnouncementAuthor")
   authoredPolls               Poll[]               @relation("PollAuthor")
+  violationsAbout             Violation[]          @relation("ViolationSubject")
+  violationsTaken             Violation[]          @relation("ViolationTakenBy")
+  violationsResolved          Violation[]          @relation("ViolationResolvedBy")
 
   @@index([personId])
   @@index([staffUnitId])
@@ -1373,6 +1377,7 @@ model Area {
 
   responsibles      AreaResponsible[]
   inspectionResults InspectionResult[]
+  violations        Violation[]
 
   @@unique([orgNodeId, areaTypeId])
 }
@@ -1476,6 +1481,7 @@ model Inspection {
   completedAt         DateTime?
   createdAt           DateTime           @default(now())
   results             InspectionResult[]
+  violations          Violation[]
 
   @@index([orgNodeId, status])
 }
@@ -1503,6 +1509,45 @@ model InspectionResult {
   /// Шлях відносно storage/ (фото за потреби).
   photoPath    String?
   ratedAt      DateTime         @default(now())
+  violation    Violation?
 
   @@index([inspectionId])
+}
+
+enum ViolationStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+}
+
+/// Порушення регламенту = 🔴-оцінка завершеного обходу. Створюється при
+/// завершенні обходу; відкрите → прийнято в роботу → усунуто.
+model Violation {
+  id                  Int              @id @default(autoincrement())
+  inspectionId        Int
+  inspection          Inspection       @relation(fields: [inspectionId], references: [id])
+  resultId            Int              @unique
+  result              InspectionResult @relation(fields: [resultId], references: [id])
+  orgNodeId           Int
+  orgNode             OrgNode          @relation(fields: [orgNodeId], references: [id])
+  /// Знімок тексту вимоги й коментаря — регламент далі може змінитись.
+  text                String
+  comment             String
+  target              RegulationTarget
+  areaId              Int?
+  area                Area?            @relation(fields: [areaId], references: [id])
+  subjectEmploymentId Int?
+  subjectEmployment   Employment?      @relation("ViolationSubject", fields: [subjectEmploymentId], references: [id])
+  status              ViolationStatus  @default(OPEN)
+  createdAt           DateTime         @default(now())
+  takenAt             DateTime?
+  takenById           Int?
+  takenBy             Employment?      @relation("ViolationTakenBy", fields: [takenById], references: [id])
+  resolvedAt          DateTime?
+  resolvedById        Int?
+  resolvedBy          Employment?      @relation("ViolationResolvedBy", fields: [resolvedById], references: [id])
+  /// Негатив у рейтингу, створений автоматично для індивідуальної вимоги.
+  ratingEventId       Int?
+
+  @@index([orgNodeId, status])
 }

@@ -914,6 +914,8 @@ const ratingCategories: RatingCategorySeed[] = [
   { code: "sanitary_n", name: "Санітарія", side: RatingSide.NEG, defaultPoints: -8 },
   { code: "equip_n", name: "Недбале ставлення до обладнання", side: RatingSide.NEG, defaultPoints: -8 },
   { code: "conflict", name: "Конфлікт з клієнтом", side: RatingSide.NEG, defaultPoints: -10 },
+  // Автоматично з 🔴 індивідуальної вимоги обходу (етап 8).
+  { code: "regulation_violation", name: "Порушення регламенту", side: RatingSide.NEG, defaultPoints: -5 },
 ];
 
 async function seedRatingCategories() {
@@ -1396,6 +1398,11 @@ const notificationTemplates: { key: string; description: string; text: string }[
     key: "inspection.postponed",
     description: "Адміну магазину, директору кластера й COO — обхід не проведено, перенесено на наступний день",
     text: "{{storeName}}: {{kind}} обхід, запланований на {{was}}, не проведено. Перенесено на {{next}}.",
+  },
+  {
+    key: "violation.opened",
+    description: "Порушення регламенту за результатами обходу — відповідальним, працівнику або керівникам (з кнопкою «Прийнято в роботу»)",
+    text: "🔴 {{storeName}}: порушення регламенту.\n{{where}}: {{text}}\nКоментар: {{comment}}\n\nПрийміть в роботу й виправте.",
   },
   {
     key: "reminder.due",

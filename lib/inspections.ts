@@ -173,7 +173,7 @@ export async function ensurePlanned(orgNodeId: number, now: Date): Promise<numbe
 }
 
 /** Кому повідомляти про пропущений обхід: адмін магазину, директор кластера (голова підрозділу над магазином), COO. */
-async function missedRecipients(storePath: string): Promise<number[]> {
+export async function leadershipRecipients(storePath: string): Promise<number[]> {
   const personIds = new Set<number>();
   const add = async (employmentId: number | null | undefined) => {
     if (!employmentId) return;
@@ -208,7 +208,7 @@ export async function tickInspections(now: Date = new Date()): Promise<{ postpon
     let next = new Date(insp.plannedFor.getTime() + DAY_MS);
     while (next.getTime() < todayStart.getTime()) next = new Date(next.getTime() + DAY_MS);
     await prisma.inspection.update({ where: { id: insp.id }, data: { plannedFor: next, postponedCount: { increment: 1 } } });
-    for (const personId of await missedRecipients(insp.orgNode.path)) {
+    for (const personId of await leadershipRecipients(insp.orgNode.path)) {
       await sendNotification(personId, "inspection.postponed", {
         storeName: insp.orgNode.name,
         kind: KIND_LABEL[insp.kind],

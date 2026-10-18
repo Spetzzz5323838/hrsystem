@@ -7,5 +7,5 @@ export async function POST(_request: NextRequest, { params }: { params: Promise<
 
   const result = await completeInspection(auth.inspection.id, auth.actor.id);
   if (!result.ok) return NextResponse.json({ error: result.error }, { status: 400 });
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, violations: result.violations });
 }

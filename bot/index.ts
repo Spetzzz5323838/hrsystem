@@ -1,4 +1,4 @@
-import { Bot, Keyboard } from "grammy";
+import { Bot, Keyboard, type Context } from "grammy";
 import { prisma } from "../lib/prisma";
 import { resolveAssignee, confirmReadyForAttestation, completeTask, getMyPendingEmployeeMarkTasks } from "../lib/onboarding";
 import { registerTelegramMessageWorker } from "../lib/notifications";
@@ -12,6 +12,7 @@ import { autoCloseStaleShifts } from "../lib/timesheet";
 import { checkSilentTerminals } from "../lib/terminal";
 import { checkUnstaffedAreas } from "../lib/areas";
 import { tickInspections } from "../lib/inspections";
+import { takeViolation, resolveViolation, resolveButton } from "../lib/violations";
 import { listAnnouncementsForPerson } from "../lib/announcements";
 import { castVote, closeExpiredPolls } from "../lib/polls";
 import { acknowledgeReview } from "../lib/review";
@@ -599,6 +600,25 @@ bot.callbackQuery(/^employee_task_done:(\d+)$/, async (ctx) => {
   await ctx.editMessageReplyMarkup(undefined).catch(() => {});
   await ctx.reply(`Позначено виконаним: «${task.itemTemplate.title}».`);
 });
+
+// ── Порушення за обходом: «Прийнято в роботу» → «Усунуто». Права перевіряє
+// canActOnViolation (сам працівник, відповідальний за ділянку або керівник).
+async function violationAction(ctx: Context, violationId: number, action: "take" | "done") {
+  const person = await prisma.person.findUnique({ where: { telegramId: BigInt(ctx.from!.id) } });
+  if (!person) {
+    await ctx.answerCallbackQuery({ text: "Вас не знайдено в системі", show_alert: true });
+    return;
+  }
+  const result = action === "take" ? await takeViolation(violationId, person.id) : await resolveViolation(violationId, person.id);
+  if (!result.ok) {
+    await ctx.answerCallbackQuery({ text: result.error, show_alert: true });
+    return;
+  }
+  await ctx.answerCallbackQuery({ text: action === "take" ? "Прийнято в роботу" : "Дякуємо, зафіксовано!" });
+  await ctx.editMessageReplyMarkup(action === "take" ? { reply_markup: resolveButton(violationId) } : undefined).catch(() => {});
+}
+bot.callbackQuery(/^viol_take:(\d+)$/, (ctx) => violationAction(ctx, Number(ctx.match[1]), "take"));
+bot.callbackQuery(/^viol_done:(\d+)$/, (ctx) => violationAction(ctx, Number(ctx.match[1]), "done"));
 
 bot.catch((err) => {
   console.error("Bot error:", err);

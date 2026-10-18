@@ -128,7 +128,7 @@ export default function InspectionRunPage({ params }: { params: Promise<{ id: st
     const b = await r.json().catch(() => ({}));
     setBusy(false);
     if (!r.ok) setError(b.error ?? "Не вдалося завершити");
-    else router.push("/inspections");
+    else router.push(`/inspections?violations=${b.violations ?? 0}`);
   };
 
   return (

@@ -48,6 +48,8 @@ export type CreateRatingEventInput = {
   badgeCode?: string;
   /** Потрібне, якщо це вже 3-й+ негатив цьому працівнику за тиждень (docs §2.2). */
   confirmedConversation?: boolean;
+  /** Автоматичний негатив із порушення регламенту (обхід): правило «3-й негатив за тиждень» не застосовується (погоджено 2026-10-18). */
+  skipConversationRule?: boolean;
 };
 
 export type CreateRatingEventResult =
@@ -97,7 +99,7 @@ export async function createRatingEvent(input: CreateRatingEventInput): Promise<
     visibility = Visibility.PUBLIC;
   }
 
-  if (input.type === "NEGATIVE") {
+  if (input.type === "NEGATIVE" && !input.skipConversationRule) {
     const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
     const recentNegatives = await prisma.ratingEvent.count({
       where: { personId: input.personId, type: RatingType.NEGATIVE, cancelledAt: null, occurredAt: { gte: weekAgo } },
