@@ -29,7 +29,7 @@ const NAV = [
  */
 export default function AppShell({ active, children }: { active: string; children: React.ReactNode }) {
   const router = useRouter();
-  const [me, setMe] = useState<{ fullName: string; phone: string } | null>(null);
+  const [me, setMe] = useState<{ fullName: string; phone: string; positions?: string[] } | null>(null);
   const [caps, setCaps] = useState<Set<string>>(new Set());
 
   useEffect(() => {
@@ -81,7 +81,7 @@ export default function AppShell({ active, children }: { active: string; childre
 
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-6 py-3">
-          <span className="text-sm text-slate-500">{me ? `${me.fullName} · ${me.phone}` : ""}</span>
+          <span className="text-sm text-slate-500">{me ? `${me.fullName} · ${me.positions?.length ? me.positions.join(", ") + " · " : ""}${me.phone}` : ""}</span>
           <button onClick={logout} className="rounded border border-slate-300 px-3 py-1 text-sm text-slate-600 hover:bg-slate-50">
             Вийти
           </button>

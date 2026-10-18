@@ -7,7 +7,7 @@ import { isCuratorEligibleFor } from "./curator";
 import { hashPassword, generateCabinetPassword } from "./auth";
 import { checkProfileClosedBadge, checkBeyondProfileBadge, checkFastStartBadge, checkMentorBadge } from "./rating";
 import { queueMaterialFileDelivery } from "./notifications";
-import { CREDENTIALS_STEP_TITLES, issueOnboardingCredentials } from "./posPassword";
+import { CREDENTIALS_STEP_TITLES, issueOnboardingCredentials } from "./credentials";
 import {
   Role,
   ActionType,
@@ -237,7 +237,7 @@ export async function startOnboarding(employmentId: number): Promise<{ instanceI
         await sendOnboardingMaterials(employment);
       }
       if (CREDENTIALS_STEP_TITLES.includes(item.title)) {
-        await issueOnboardingCredentials(employment.id, null);
+        await issueOnboardingCredentials(employment.id);
       }
     } else if (item.responsibleRole === Role.EMPLOYEE) {
       assigneeId = employment.id;

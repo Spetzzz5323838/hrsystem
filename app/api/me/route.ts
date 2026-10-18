@@ -13,7 +13,10 @@ export async function GET() {
   const [scopePaths, grants, employments] = await Promise.all([
     resolveScopePaths(person.id),
     getEffectiveGrants(person.id),
-    prisma.employment.findMany({ where: { personId: person.id }, select: { id: true } }),
+    prisma.employment.findMany({
+      where: { personId: person.id },
+      select: { id: true, status: true, staffUnit: { select: { positionProfile: { select: { title: true } }, orgNode: { select: { name: true } } } } },
+    }),
   ]);
 
   return NextResponse.json({
@@ -23,5 +26,9 @@ export async function GET() {
     scopePaths,
     grants,
     employmentIds: employments.map((e) => e.id),
+    // Посади чинних працевлаштувань — для підпису у верхній панелі
+    positions: employments
+      .filter((e) => e.status !== "TERMINATED")
+      .map((e) => `${e.staffUnit.positionProfile.title} (${e.staffUnit.orgNode.name})`),
   });
 }

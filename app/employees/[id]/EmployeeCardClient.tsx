@@ -37,7 +37,6 @@ type Detail = {
   badgeCode: string | null;
   badgeCodeIssuedAt: string | null;
   requiresCashierAccount: boolean;
-  posPasswordSetAt: string | null;
   staffUnitId: number;
   competencies: CompetencyRow[];
   bonusCompetencies: BonusCompetencyRow[];
@@ -1346,22 +1345,15 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
       .finally(() => setCuratorSubmitting(false));
   };
 
-  const reissueCredential = (kind: "badge" | "pos") => {
-    const question =
-      kind === "badge"
-        ? "Перевидати код бейджа? Старий бейдж перестане працювати на терміналі — бейдж треба буде передрукувати."
-        : "Перевидати пароль до каси? Новий пароль прийде працівнику в Telegram, старий треба буде замінити на касі.";
-    if (!confirm(question)) return;
-    setCredentialsBusy(kind);
+  const reissueCredential = () => {
+    if (!confirm("Перевидати код бейджа? Старий бейдж перестане працювати на терміналі й на касі. Новий код прийде працівнику в Telegram.")) return;
+    setCredentialsBusy("badge");
     setCredentialsMessage(null);
-    fetch(`/api/employees/${employmentId}/${kind === "badge" ? "badge-code" : "pos-password"}/reissue`, { method: "POST" })
+    fetch(`/api/employees/${employmentId}/badge-code/reissue`, { method: "POST" })
       .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
       .then(({ ok, body }) => {
         if (!ok) throw new Error(body.error ?? "Не вдалося перевидати");
-        setCredentialsMessage({
-          ok: true,
-          text: kind === "badge" ? "Новий код видано — надрукуйте новий бейдж." : "Новий пароль до каси надіслано працівнику в Telegram.",
-        });
+        setCredentialsMessage({ ok: true, text: "Новий код видано й надіслано працівнику в Telegram. Якщо друкуєте бейдж — надрукуйте новий." });
         loadDetail();
       })
       .catch((e) => setCredentialsMessage({ ok: false, text: e.message }))
@@ -2297,31 +2289,12 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
                   </p>
                   <button
                     disabled={credentialsBusy !== null}
-                    onClick={() => reissueCredential("badge")}
+                    onClick={() => reissueCredential()}
                     className="shrink-0 rounded border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
                   >
                     Перевидати код бейджа
                   </button>
                 </div>
-                {detail.requiresCashierAccount && (
-                  <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-2">
-                    <p className="text-sm text-slate-600">
-                      Пароль до каси:{" "}
-                      {detail.posPasswordSetAt ? (
-                        <span>видано {new Date(detail.posPasswordSetAt).toLocaleDateString("uk-UA")}</span>
-                      ) : (
-                        <span className="text-slate-400">ще не видано</span>
-                      )}
-                    </p>
-                    <button
-                      disabled={credentialsBusy !== null}
-                      onClick={() => reissueCredential("pos")}
-                      className="shrink-0 rounded border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-                    >
-                      Перевидати пароль до каси
-                    </button>
-                  </div>
-                )}
                 {credentialsMessage && (
                   <p className={`text-sm ${credentialsMessage.ok ? "text-emerald-700" : "text-rose-700"}`}>{credentialsMessage.text}</p>
                 )}

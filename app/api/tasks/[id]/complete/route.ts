@@ -4,7 +4,7 @@ import { getSessionPerson } from "../../../../../lib/auth";
 import { completeTask, completeCuratorAssignmentTask } from "../../../../../lib/onboarding";
 import { completeTransferTask } from "../../../../../lib/transfer";
 import { completeTerminationTask } from "../../../../../lib/termination";
-import { CREDENTIALS_STEP_TITLES, completeCredentialsTask } from "../../../../../lib/posPassword";
+import { CREDENTIALS_STEP_TITLES, completeCredentialsTask } from "../../../../../lib/credentials";
 import { ProcessType } from "../../../../../generated/prisma/client";
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {

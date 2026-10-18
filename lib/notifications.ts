@@ -4,11 +4,11 @@ import { sendTelegramMessage } from "./telegram";
 import { NotificationStatus } from "../generated/prisma/client";
 
 export const TELEGRAM_MESSAGE_QUEUE = "telegram-message";
-export const POS_PASSWORD_DELIVERY_QUEUE = "pos-password-delivery";
+export const BADGE_CODE_DELIVERY_QUEUE = "badge-code-delivery";
 export const MATERIAL_FILE_DELIVERY_QUEUE = "material-file-delivery";
 
 type TelegramMessageJob = { telegramId: string; text: string; replyMarkup?: unknown; notificationId?: number };
-type PosPasswordDeliveryJob = { employmentId: number };
+type BadgeCodeDeliveryJob = { personId: number };
 type MaterialFileDeliveryJob = { personId: number; materialId: number };
 
 /**
@@ -33,16 +33,15 @@ export async function queueTelegramMessage(telegramId: bigint, text: string, rep
 }
 
 /**
- * У чергу кладеться лише employmentId, не сам пароль і не готова картинка
- * — розшифрування й генерація штрихкода відбуваються заново в
- * lib/posPassword.ts::deliverPosPassword, безпосередньо перед
- * відправкою (воркер зареєстрований у bot/index.ts, бо там же й
+ * У чергу кладеться лише personId, не готова картинка — штрихкод
+ * генерується заново в lib/credentials.ts::deliverBadgeCode,
+ * безпосередньо перед відправкою (воркер зареєстрований у bot/index.ts, бо там же й
  * Bot API — той самий принцип, що й для щоденних перевірок бейджів/SLA).
  */
-export async function queuePosPasswordDelivery(employmentId: number): Promise<void> {
+export async function queueBadgeCodeDelivery(personId: number): Promise<void> {
   const boss = await getBoss();
-  await boss.createQueue(POS_PASSWORD_DELIVERY_QUEUE);
-  await boss.send(POS_PASSWORD_DELIVERY_QUEUE, { employmentId } satisfies PosPasswordDeliveryJob, {
+  await boss.createQueue(BADGE_CODE_DELIVERY_QUEUE);
+  await boss.send(BADGE_CODE_DELIVERY_QUEUE, { personId } satisfies BadgeCodeDeliveryJob, {
     retryLimit: 5,
     retryBackoff: true,
   });
@@ -51,7 +50,7 @@ export async function queuePosPasswordDelivery(employmentId: number): Promise<vo
 /**
  * У чергу — лише personId+materialId, файл читається з диска заново
  * безпосередньо перед відправкою (lib/materials.ts::readMaterialFile,
- * той самий принцип, що пароль до каси — не тримати вміст файлу в черзі).
+ * той самий принцип, що код бейджа — не тримати вміст файлу в черзі).
  */
 export async function queueMaterialFileDelivery(personId: number, materialId: number): Promise<void> {
   const boss = await getBoss();

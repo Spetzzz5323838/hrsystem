@@ -391,13 +391,6 @@ model Employment {
   terminationReason     TerminationReason? @relation(fields: [terminationReasonCode], references: [code])
   lastWorkingDay        DateTime?
 
-  /// Пароль до каси — генерує система (2026-10-18, раніше вводив оператор
-  /// 1С). Зашифрований AES-256-GCM, ключ поза базою (ONEC_PASSWORD_KEY у
-  /// .env). Не на бейджі, не в UI — тільки штрихкод одноразово в Telegram,
-  /// lib/posPassword.ts. Лише для посад з requiresCashierAccount.
-  posPasswordCipher String?
-  posPasswordSetAt  DateTime?
-
   managerId    Int?
   manager      Employment?  @relation("EmploymentManager", fields: [managerId], references: [id])
   subordinates Employment[] @relation("EmploymentManager")

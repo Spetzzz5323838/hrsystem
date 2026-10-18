@@ -1,6 +1,7 @@
 import { randomInt } from "node:crypto";
 import { prisma } from "./prisma";
 import { logAudit } from "./audit";
+import { queueBadgeCodeDelivery } from "./notifications";
 
 const BADGE_CODE_LENGTH = 10;
 
@@ -35,5 +36,6 @@ export async function reissueBadgeCode(personId: number, actorEmploymentId: numb
   const code = await generateUniqueBadgeCode();
   await prisma.person.update({ where: { id: personId }, data: { badgeCode: code, badgeCodeIssuedAt: new Date() } });
   await logAudit({ actorId: actorEmploymentId, action: "badgeCode.reissued", entityType: "Person", entityId: personId });
+  await queueBadgeCodeDelivery(personId);
   return code;
 }

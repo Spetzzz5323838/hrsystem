@@ -77,7 +77,6 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
     badgeCode: employment.person.badgeCode,
     badgeCodeIssuedAt: employment.person.badgeCodeIssuedAt,
     requiresCashierAccount: employment.staffUnit.positionProfile.requiresCashierAccount,
-    posPasswordSetAt: employment.posPasswordSetAt,
     competencies,
     bonusCompetencies,
   });
