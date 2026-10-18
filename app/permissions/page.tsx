@@ -29,6 +29,8 @@ const CAPABILITY_LABELS: Record<string, string> = {
   UPLOAD_DOCUMENTS: "Завантаження документів",
   SET_1C_PASSWORD: "Перевидача пароля до каси",
   OPERATE_TERMINAL: "Робота з терміналом обліку часу",
+  VIEW_TIMESHEET: "Перегляд табеля",
+  EDIT_SHIFTS: "Виправлення табеля",
   MANAGE_TERMINALS: "Керування терміналами",
   CLOSE_INTERNSHIP: "Закриття стажування",
   RUN_ATTESTATION: "Приймання атестації",

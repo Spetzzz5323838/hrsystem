@@ -370,6 +370,8 @@ const ACCESS_PROFILES: AccessProfileSeed[] = [
       Capability.MANAGE_VACANCIES,
       Capability.MANAGE_ANNOUNCEMENTS,
       Capability.OPERATE_TERMINAL,
+      Capability.VIEW_TIMESHEET,
+      Capability.EDIT_SHIFTS,
     ],
   },
   // Облік робочого часу (2026-10-18): працювати з терміналом (старший касир
@@ -383,6 +385,7 @@ const ACCESS_PROFILES: AccessProfileSeed[] = [
   {
     name: "Бухгалтерія",
     capabilities: [
+      Capability.VIEW_TIMESHEET,
       Capability.VIEW_EMPLOYEE,
       Capability.VIEW_DOCUMENTS,
       Capability.UPLOAD_DOCUMENTS,
@@ -1306,6 +1309,11 @@ const notificationTemplates: { key: string; description: string; text: string }[
     key: "vacancy.opened",
     description: "Адміністратору об'єкта — з'явилась вакансія",
     text: "Нова вакансія: {{positionTitle}} ({{objectName}}) — {{reason}}. Потрібно розмістити оголошення й почати пошук кандидатів.",
+  },
+  {
+    key: "shift.autoClosed",
+    description: "Адміністратору магазину — зміни, закриті автоматично (не було відмітки завершення)",
+    text: "{{storeName}}: немає відмітки завершення, зміни закрито автоматично тривалістю {{hours}} год:\n{{list}}\n\nПеревірте й за потреби виправте час у табелі.",
   },
   {
     key: "reminder.due",

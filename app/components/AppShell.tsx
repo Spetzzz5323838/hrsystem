@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ListChecks, Users, BookOpen, Network, ShieldCheck, CalendarDays, BarChart3, Megaphone, ScanBarcode } from "lucide-react";
+import { ListChecks, Users, BookOpen, Network, ShieldCheck, CalendarDays, BarChart3, Megaphone, ScanBarcode, Clock } from "lucide-react";
 
 const NAV = [
   { href: "/", label: "Мої задачі", icon: ListChecks },
@@ -12,6 +12,7 @@ const NAV = [
   { href: "/communications", label: "Комунікації", icon: Megaphone, cap: "MANAGE_ANNOUNCEMENTS" },
   { href: "/terminal", label: "Термінал", icon: ScanBarcode, cap: "OPERATE_TERMINAL" },
   { href: "/terminals", label: "Термінали", icon: ScanBarcode, cap: "MANAGE_TERMINALS" },
+  { href: "/timesheet", label: "Табель", icon: Clock, cap: "VIEW_TIMESHEET" },
   { href: "/structure", label: "Структура", icon: Network },
   { href: "/catalog", label: "Довідники", icon: BookOpen },
   { href: "/analytics", label: "Аналітика", icon: BarChart3, cap: "VIEW_ANALYTICS" },

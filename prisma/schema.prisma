@@ -101,6 +101,10 @@ enum Capability {
   OPERATE_TERMINAL
   /// Реєстрація/відкликання комп'ютерів-терміналів — сисадмін, COO, директор кластера.
   MANAGE_TERMINALS
+  /// Табель робочого часу (етап 3): перегляд — адмін, директор кластера, бухгалтерія, COO.
+  VIEW_TIMESHEET
+  /// Ручне виправлення/додавання змін у табелі — з обов'язковою причиною й журналом.
+  EDIT_SHIFTS
 }
 
 enum EmploymentStatus {
@@ -435,6 +439,7 @@ model Employment {
   createdVacancies            Vacancy[]            @relation("VacancyCreatedBy")
   registeredTerminals         Terminal[]           @relation("TerminalRegisteredBy")
   workShiftsOf                WorkShift[]          @relation("WorkShiftEmployment")
+  editedShifts                WorkShift[]          @relation("WorkShiftEditedBy")
   scanEventsAsEmployee        ScanEvent[]          @relation("ScanEventEmployment")
   scanEventsAsOperator        ScanEvent[]          @relation("ScanEventOperator")
   closedVacancies             Vacancy[]            @relation("VacancyClosedBy")
@@ -1285,6 +1290,11 @@ model WorkShift {
   endTerminalId   Int?
   endTerminal     Terminal?       @relation("WorkShiftEndTerminal", fields: [endTerminalId], references: [id])
   closeKind       ShiftCloseKind?
+  /// Остання ручна правка (повна історія — AuditLog, дія shift.edited/shift.created).
+  editedAt        DateTime?
+  editedById      Int?
+  editedBy        Employment?     @relation("WorkShiftEditedBy", fields: [editedById], references: [id])
+  editReason      String?
 
   scanEvents ScanEvent[]
 
