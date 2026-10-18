@@ -840,3 +840,129 @@ export async function getExpiringCompetencies(scopePaths: string[], monthsAhead:
   rows.sort((a, b) => a.validUntil.localeCompare(b.validUntil));
   return rows;
 }
+
+export type InspectionStatsStoreRow = {
+  objectId: number;
+  objectName: string;
+  inspections: number;
+  postponed: number;
+  green: number;
+  yellow: number;
+  red: number;
+  greenPercent: number;
+  openViolations: number;
+};
+export type InspectionStatsBucket = { label: string; green: number; yellow: number; red: number; total: number; redPercent: number };
+export type InspectionStatsRequirement = { text: string; where: string; red: number; total: number };
+export type InspectionAnalytics = {
+  months: number;
+  completed: number;
+  green: number;
+  yellow: number;
+  red: number;
+  violationsOpen: number;
+  violationsInProgress: number;
+  violationsResolved: number;
+  avgResolveHours: number | null;
+  byStore: InspectionStatsStoreRow[];
+  byArea: InspectionStatsBucket[];
+  topRequirements: InspectionStatsRequirement[];
+};
+
+/**
+ * Статистика обходів (етап 9): прості лічильники 🟢/🟡/🔴 — без KPI-формули
+ * (її свідомо відкладено) і без розрізу по окремих працівниках: індивідуальні
+ * оцінки видно лише в рейтингу керівникам, тут вони лише входять у загальні суми.
+ */
+export async function getInspectionAnalytics(scopePaths: string[], monthsBack: number): Promise<InspectionAnalytics> {
+  const since = new Date();
+  since.setMonth(since.getMonth() - monthsBack);
+
+  const stores = (await prisma.orgNode.findMany({ where: { type: OrgNodeType.OBJECT, isActive: true } })).filter((o) => coveredByScope(scopePaths, o.path));
+  const storeIds = stores.map((s) => s.id);
+
+  const inspections = await prisma.inspection.findMany({
+    where: { orgNodeId: { in: storeIds }, status: "COMPLETED", completedAt: { gte: since } },
+    include: { results: { include: { item: true, area: { include: { areaType: true } } } } },
+  });
+  const postponedAll = await prisma.inspection.findMany({ where: { orgNodeId: { in: storeIds }, postponedCount: { gt: 0 }, plannedFor: { gte: since } }, select: { orgNodeId: true, postponedCount: true } });
+  const violations = await prisma.violation.findMany({ where: { orgNodeId: { in: storeIds }, OR: [{ createdAt: { gte: since } }, { status: { not: "RESOLVED" } }] } });
+
+  const storeRows = new Map<number, InspectionStatsStoreRow>(
+    stores.map((s) => [s.id, { objectId: s.id, objectName: s.name, inspections: 0, postponed: 0, green: 0, yellow: 0, red: 0, greenPercent: 0, openViolations: 0 }]),
+  );
+  const areaBuckets = new Map<string, InspectionStatsBucket>();
+  const reqMap = new Map<string, InspectionStatsRequirement>();
+  const bump = (b: { green: number; yellow: number; red: number }, rating: string) => {
+    if (rating === "GREEN") b.green += 1;
+    else if (rating === "YELLOW") b.yellow += 1;
+    else b.red += 1;
+  };
+
+  let green = 0;
+  let yellow = 0;
+  let red = 0;
+  for (const insp of inspections) {
+    const row = storeRows.get(insp.orgNodeId)!;
+    row.inspections += 1;
+    for (const r of insp.results) {
+      bump(row, r.rating);
+      if (r.rating === "GREEN") green += 1;
+      else if (r.rating === "YELLOW") yellow += 1;
+      else red += 1;
+
+      const label = r.item.target === "AREA" ? (r.area?.areaType.name ?? "Ділянка") : r.item.target === "PERSON" ? "Працівники (разом)" : "Загальний стан";
+      const bucket = areaBuckets.get(label) ?? { label, green: 0, yellow: 0, red: 0, total: 0, redPercent: 0 };
+      bump(bucket, r.rating);
+      bucket.total += 1;
+      areaBuckets.set(label, bucket);
+
+      const reqKey = `${r.item.id}`;
+      const req = reqMap.get(reqKey) ?? { text: r.item.text, where: label, red: 0, total: 0 };
+      req.total += 1;
+      if (r.rating === "RED") req.red += 1;
+      reqMap.set(reqKey, req);
+    }
+  }
+  for (const p of postponedAll) {
+    const row = storeRows.get(p.orgNodeId);
+    if (row) row.postponed += p.postponedCount;
+  }
+
+  let open = 0;
+  let inProgress = 0;
+  let resolved = 0;
+  const resolveHours: number[] = [];
+  for (const v of violations) {
+    if (v.status === "OPEN") {
+      open += 1;
+      storeRows.get(v.orgNodeId)!.openViolations += 1;
+    } else if (v.status === "IN_PROGRESS") {
+      inProgress += 1;
+      storeRows.get(v.orgNodeId)!.openViolations += 1;
+    } else if (v.resolvedAt && v.resolvedAt >= since) {
+      resolved += 1;
+      resolveHours.push((v.resolvedAt.getTime() - v.createdAt.getTime()) / 3_600_000);
+    }
+  }
+
+  const pct = (part: number, total: number) => (total ? Math.round((part / total) * 100) : 0);
+  const byStore = [...storeRows.values()].filter((r) => r.inspections > 0 || r.openViolations > 0 || r.postponed > 0);
+  for (const r of byStore) r.greenPercent = pct(r.green, r.green + r.yellow + r.red);
+  const byArea = [...areaBuckets.values()].map((b) => ({ ...b, redPercent: pct(b.red, b.total) })).sort((a, b) => b.redPercent - a.redPercent);
+
+  return {
+    months: monthsBack,
+    completed: inspections.length,
+    green,
+    yellow,
+    red,
+    violationsOpen: open,
+    violationsInProgress: inProgress,
+    violationsResolved: resolved,
+    avgResolveHours: resolveHours.length ? Math.round((resolveHours.reduce((a, b) => a + b, 0) / resolveHours.length) * 10) / 10 : null,
+    byStore: byStore.sort((a, b) => a.greenPercent - b.greenPercent),
+    byArea,
+    topRequirements: [...reqMap.values()].filter((r) => r.red > 0).sort((a, b) => b.red - a.red).slice(0, 8),
+  };
+}

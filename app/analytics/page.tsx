@@ -194,6 +194,21 @@ function ratingKeyLabel(key: string | null, categories: RatingCategoryOption[]):
   return categories.find((c) => c.code === key)?.name ?? RATING_KEY_FALLBACK[key] ?? key;
 }
 
+type InspectionStatsData = {
+  months: number;
+  completed: number;
+  green: number;
+  yellow: number;
+  red: number;
+  violationsOpen: number;
+  violationsInProgress: number;
+  violationsResolved: number;
+  avgResolveHours: number | null;
+  byStore: { objectId: number; objectName: string; inspections: number; postponed: number; green: number; yellow: number; red: number; greenPercent: number; openViolations: number }[];
+  byArea: { label: string; green: number; yellow: number; red: number; total: number; redPercent: number }[];
+  topRequirements: { text: string; where: string; red: number; total: number }[];
+};
+
 function Section({ title, right, children }: { title: string; right?: React.ReactNode; children: React.ReactNode }) {
   return (
     <div className="rounded-md border border-slate-200 bg-white">
@@ -223,7 +238,19 @@ export default function AnalyticsPage() {
   const [curatorMonths, setCuratorMonths] = useState(6);
   const [ratingSummary, setRatingSummary] = useState<RatingSummaryData | null>(null);
   const [ratingSummaryMonths, setRatingSummaryMonths] = useState(3);
+  const [inspStats, setInspStats] = useState<InspectionStatsData | null>(null);
+  const [inspMonths, setInspMonths] = useState(3);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch(`/api/analytics/inspections?months=${inspMonths}`)
+      .then((r) => r.json().then((b) => ({ ok: r.ok, b })))
+      .then(({ ok, b }) => {
+        if (!ok) throw new Error(b.error);
+        setInspStats(b);
+      })
+      .catch((e) => setError(e.message));
+  }, [inspMonths]);
 
   useEffect(() => {
     fetch(`/api/analytics/hiring-funnel?months=${funnelMonths}`)
@@ -824,6 +851,120 @@ export default function AnalyticsPage() {
                   <RatingSummaryPersonTable rows={ratingSummary.topNegative} positive={false} />
                 </div>
               </div>
+            </div>
+          )}
+        </Section>
+
+        <Section
+          title="Обходи магазинів"
+          right={
+            <select value={inspMonths} onChange={(e) => setInspMonths(Number(e.target.value))} className="rounded border border-slate-300 bg-white px-2 py-1 text-xs">
+              <option value={1}>1 місяць</option>
+              <option value={3}>3 місяці</option>
+              <option value={6}>6 місяців</option>
+              <option value={12}>12 місяців</option>
+            </select>
+          }
+        >
+          {!inspStats && <p className="px-4 py-6 text-sm text-slate-500">Завантаження…</p>}
+          {inspStats && !inspStats.completed && !inspStats.byStore.length && <p className="px-4 py-6 text-sm text-slate-500">За обраний період проведених обходів немає.</p>}
+          {inspStats && (inspStats.completed > 0 || inspStats.byStore.length > 0) && (
+            <div className="space-y-4 px-4 py-3">
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <div className="rounded border border-slate-200 p-3">
+                  <p className="text-xs text-slate-500">Проведено обходів</p>
+                  <p className="text-xl font-semibold tabular-nums">{inspStats.completed}</p>
+                </div>
+                <div className="rounded border border-slate-200 p-3">
+                  <p className="text-xs text-slate-500">Оцінки</p>
+                  <p className="text-sm font-medium tabular-nums">
+                    🟢 {inspStats.green} · 🟡 {inspStats.yellow} · 🔴 {inspStats.red}
+                  </p>
+                </div>
+                <div className="rounded border border-slate-200 p-3">
+                  <p className="text-xs text-slate-500">Порушення зараз</p>
+                  <p className="text-sm font-medium tabular-nums">
+                    відкриті {inspStats.violationsOpen} · в роботі {inspStats.violationsInProgress}
+                  </p>
+                </div>
+                <div className="rounded border border-slate-200 p-3">
+                  <p className="text-xs text-slate-500">Усунуто за період</p>
+                  <p className="text-sm font-medium tabular-nums">
+                    {inspStats.violationsResolved}
+                    {inspStats.avgResolveHours !== null && <span className="text-slate-400"> · у середньому {fmtHours(inspStats.avgResolveHours)}</span>}
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div>
+                  <p className="mb-1 text-xs font-medium text-slate-500">По магазинах (спочатку найгірші)</p>
+                  <table className="w-full text-xs">
+                    <thead className="text-left text-slate-400">
+                      <tr>
+                        <th className="py-1 font-medium">Магазин</th>
+                        <th className="py-1 text-right font-medium">Обходів</th>
+                        <th className="py-1 text-right font-medium">🟢</th>
+                        <th className="py-1 text-right font-medium">🟡</th>
+                        <th className="py-1 text-right font-medium">🔴</th>
+                        <th className="py-1 text-right font-medium">Відкр.</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {inspStats.byStore.map((o) => (
+                        <tr key={o.objectId}>
+                          <td className="py-1 text-slate-700">
+                            {o.objectName}
+                            {o.postponed > 0 && <span className="ml-1 text-amber-700" title="Перенесені обходи">↻{o.postponed}</span>}
+                          </td>
+                          <td className="py-1 text-right tabular-nums text-slate-500">{o.inspections}</td>
+                          <td className="py-1 text-right tabular-nums text-slate-700">{o.greenPercent}%</td>
+                          <td className="py-1 text-right tabular-nums text-slate-500">{o.yellow}</td>
+                          <td className="py-1 text-right tabular-nums text-rose-700">{o.red}</td>
+                          <td className="py-1 text-right tabular-nums text-slate-500">{o.openViolations}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div>
+                  <p className="mb-1 text-xs font-medium text-slate-500">По ділянках (частка 🔴)</p>
+                  <table className="w-full text-xs">
+                    <tbody className="divide-y divide-slate-100">
+                      {inspStats.byArea.map((b) => (
+                        <tr key={b.label}>
+                          <td className="py-1 text-slate-700">{b.label}</td>
+                          <td className="w-24 py-1 text-right tabular-nums text-slate-500">
+                            {b.green}/{b.yellow}/{b.red}
+                          </td>
+                          <td className={`w-12 py-1 text-right tabular-nums font-medium ${b.redPercent >= 20 ? "text-rose-700" : "text-slate-700"}`}>{b.redPercent}%</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {inspStats.topRequirements.length > 0 && (
+                <div>
+                  <p className="mb-1 text-xs font-medium text-slate-500">Вимоги, що найчастіше порушують</p>
+                  <table className="w-full text-xs">
+                    <tbody className="divide-y divide-slate-100">
+                      {inspStats.topRequirements.map((r, i) => (
+                        <tr key={i}>
+                          <td className="py-1 text-slate-700">
+                            {r.text} <span className="text-slate-400">· {r.where}</span>
+                          </td>
+                          <td className="w-24 py-1 text-right tabular-nums text-rose-700">
+                            🔴 {r.red} з {r.total}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              <p className="text-xs text-slate-400">Індивідуальні оцінки працівників тут не показуються — лише входять у загальні суми. Підсумкової формули (KPI) поки немає.</p>
             </div>
           )}
         </Section>
