@@ -36,6 +36,7 @@ const CAPABILITY_LABELS: Record<string, string> = {
   MANAGE_AREAS: "Ділянки магазину й відповідальні",
   MANAGE_REGULATION: "Регламент обходів (спільний на мережу)",
   MANAGE_INSPECTION_SCHEDULE: "Розклад обходів магазинів",
+  CONDUCT_INSPECTION: "Проведення обходів магазину",
   CLOSE_INTERNSHIP: "Закриття стажування",
   RUN_ATTESTATION: "Приймання атестації",
   RATE_POSITIVE_NEGATIVE: "Оцінка позитив/негатив",

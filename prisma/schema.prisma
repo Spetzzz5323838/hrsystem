@@ -113,6 +113,8 @@ enum Capability {
   MANAGE_REGULATION
   /// Розклад обходів конкретних магазинів — сисадмін, COO, директор кластера (свої магазини).
   MANAGE_INSPECTION_SCHEDULE
+  /// Проводити обходи магазину (етап 7) — адмін свого магазину, директор кластера, COO.
+  CONDUCT_INSPECTION
 }
 
 enum EmploymentStatus {
@@ -414,6 +416,7 @@ model Employment {
   regulationVersionsCreated  RegulationVersion[]  @relation("RegulationVersionCreatedBy")
   inspectionSchedulesUpdated InspectionSchedule[] @relation("InspectionScheduleUpdatedBy")
   inspectionsConducted       Inspection[]         @relation("InspectionConductedBy")
+  inspectionResults          InspectionResult[]   @relation("InspectionResultSubject")
 
   /// Куратор — призначається пунктом чек-ліста онбордингу "Призначення
   /// куратора" (docs hr-system-plan-v1.md §8, п.2). Раніше було null-заглушкою
@@ -1368,7 +1371,8 @@ model Area {
   isActive   Boolean  @default(true)
   createdAt  DateTime @default(now())
 
-  responsibles AreaResponsible[]
+  responsibles      AreaResponsible[]
+  inspectionResults InspectionResult[]
 
   @@unique([orgNodeId, areaTypeId])
 }
@@ -1424,17 +1428,18 @@ model RegulationVersion {
 /// Вимога регламенту. У щоденний обхід потрапляють лише вимоги з inDaily
 /// (критичні); щотижневий — детальний, включає всі вимоги.
 model RegulationItem {
-  id                Int               @id @default(autoincrement())
+  id                Int                @id @default(autoincrement())
   versionId         Int
-  version           RegulationVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  version           RegulationVersion  @relation(fields: [versionId], references: [id], onDelete: Cascade)
   sortOrder         Int
   text              String
   target            RegulationTarget
   areaTypeId        Int?
-  areaType          AreaType?         @relation(fields: [areaTypeId], references: [id])
+  areaType          AreaType?          @relation(fields: [areaTypeId], references: [id])
   positionProfileId Int?
-  positionProfile   PositionProfile?  @relation(fields: [positionProfileId], references: [id])
-  inDaily           Boolean           @default(false)
+  positionProfile   PositionProfile?   @relation(fields: [positionProfileId], references: [id])
+  inDaily           Boolean            @default(false)
+  results           InspectionResult[]
 
   @@index([versionId])
 }
@@ -1470,6 +1475,34 @@ model Inspection {
   startedAt           DateTime?
   completedAt         DateTime?
   createdAt           DateTime           @default(now())
+  results             InspectionResult[]
 
   @@index([orgNodeId, status])
+}
+
+enum InspectionRating {
+  GREEN
+  YELLOW
+  RED
+}
+
+/// Оцінка однієї вимоги в обході: для загальної — без суб'єкта, для ділянки — areaId, для працівника — employmentId.
+model InspectionResult {
+  id           Int              @id @default(autoincrement())
+  inspectionId Int
+  inspection   Inspection       @relation(fields: [inspectionId], references: [id], onDelete: Cascade)
+  itemId       Int
+  item         RegulationItem   @relation(fields: [itemId], references: [id])
+  areaId       Int?
+  area         Area?            @relation(fields: [areaId], references: [id])
+  employmentId Int?
+  employment   Employment?      @relation("InspectionResultSubject", fields: [employmentId], references: [id])
+  rating       InspectionRating
+  /// Обов'язковий для RED.
+  comment      String?
+  /// Шлях відносно storage/ (фото за потреби).
+  photoPath    String?
+  ratedAt      DateTime         @default(now())
+
+  @@index([inspectionId])
 }

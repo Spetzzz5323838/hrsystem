@@ -373,6 +373,7 @@ const ACCESS_PROFILES: AccessProfileSeed[] = [
       Capability.VIEW_TIMESHEET,
       Capability.EDIT_SHIFTS,
       Capability.MANAGE_AREAS,
+      Capability.CONDUCT_INSPECTION,
     ],
   },
   // Облік робочого часу (2026-10-18): працювати з терміналом (старший касир
