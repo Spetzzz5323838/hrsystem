@@ -6,6 +6,8 @@ Windows Server 2019, без Docker. Два процеси під PM2: сайт (
 
 ## Один раз, при першому розгортанні
 
+> Якщо на сервері є Claude Code, він може виконати все це сам за `docs/deploy-claude-instructions.md`: достатньо сказати йому прочитати цей файл і слідувати йому.
+
 1. **Встановити:** Node.js (LTS, не нижче 20), PostgreSQL 16, Git, PM2 (`npm install -g pm2`).
 2. **База:** створити користувача `hruser` і базу `hrsystem`. Якщо міграція скаржиться на доступ до схеми `public`, у базі `hrsystem` виконати `GRANT ALL ON SCHEMA public TO hruser;`.
 3. **Код:** `git clone https://github.com/Spetzzz5323838/hrsystem.git`, перейти в папку проєкту.
