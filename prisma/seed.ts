@@ -524,6 +524,11 @@ async function seedPositionAccessAssignments(profileIdByName: Map<string, number
 // Телефонів у прототипі немає — тестові номери й пароль лише для розробки.
 const DEV_PASSWORD = "Test1234!";
 
+// SEED_MODE=production (бойовий сервер): довідники, шаблони й каталоги створюються
+// як завжди, але БЕЗ тестових людей, лінійного персоналу, обладнання й демо-матеріалів.
+// Єдиний обліковий запис — перший системний адміністратор з INITIAL_ADMIN_* у .env.
+const PRODUCTION_SEED = process.env.SEED_MODE === "production";
+
 type TestUserSeed = {
   phone: string;
   fullName: string;
@@ -545,7 +550,21 @@ const testUsers: TestUserSeed[] = [
 async function seedTestUsers() {
   const root = await prisma.orgNode.findUniqueOrThrow({ where: { code: "ROOT" } });
 
-  for (const u of testUsers) {
+  let users: TestUserSeed[] = testUsers;
+  let password = DEV_PASSWORD;
+  if (PRODUCTION_SEED) {
+    const phone = process.env.INITIAL_ADMIN_PHONE?.trim();
+    const fullName = process.env.INITIAL_ADMIN_NAME?.trim();
+    const initialPassword = process.env.INITIAL_ADMIN_PASSWORD;
+    if (!phone || !fullName || !initialPassword) {
+      throw new Error("Для SEED_MODE=production задайте INITIAL_ADMIN_PHONE, INITIAL_ADMIN_NAME і INITIAL_ADMIN_PASSWORD у .env");
+    }
+    if (initialPassword.length < 10) throw new Error("INITIAL_ADMIN_PASSWORD має бути не коротшим за 10 символів");
+    users = [{ phone, fullName, positionTitle: "Системний адміністратор", orgNodeCode: "ONEC", role: Role.SYSADMIN }];
+    password = initialPassword;
+  }
+
+  for (const u of users) {
     const orgNode = await prisma.orgNode.findUniqueOrThrow({ where: { code: u.orgNodeCode } });
     const positionProfile = await prisma.positionProfile.findUniqueOrThrow({ where: { title: u.positionTitle } });
 
@@ -558,7 +577,7 @@ async function seedTestUsers() {
     const person = await prisma.person.upsert({
       where: { phone: u.phone },
       update: {},
-      create: { fullName: u.fullName, phone: u.phone, passwordHash: await hashPassword(DEV_PASSWORD) },
+      create: { fullName: u.fullName, phone: u.phone, passwordHash: await hashPassword(password) },
     });
 
     // За personId, не (personId, staffUnitId) — та сама причина, що й у
@@ -1438,8 +1457,10 @@ async function main() {
   console.log("Компетенції по посадах...");
   await seedPositionCompetencies();
 
-  console.log("Навчальні матеріали...");
-  await seedMaterials();
+  if (!PRODUCTION_SEED) {
+    console.log("Навчальні матеріали...");
+    await seedMaterials();
+  }
 
   console.log("Профілі доступу...");
   const accessProfileIdByName = await seedAccessProfiles();
@@ -1474,14 +1495,16 @@ async function main() {
   console.log("Тестові облікові записи...");
   await seedTestUsers();
 
-  console.log("Керівники вузлів...");
-  await seedOrgHeads();
+  if (!PRODUCTION_SEED) {
+    console.log("Керівники вузлів...");
+    await seedOrgHeads();
 
-  console.log("Лінійний персонал...");
-  await seedLineStaff();
+    console.log("Лінійний персонал...");
+    await seedLineStaff();
 
-  console.log("Обладнання...");
-  await seedEquipment();
+    console.log("Обладнання...");
+    await seedEquipment();
+  }
 
   console.log("Типи ділянок...");
   await seedAreaTypes();

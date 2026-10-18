@@ -1,3 +1,4 @@
+import { cookieSecure } from "./cookieSecurity";
 import { createHash, randomBytes } from "node:crypto";
 import { cookies } from "next/headers";
 import { prisma } from "./prisma";
@@ -54,7 +55,7 @@ export async function registerTerminal(orgNodeId: number, name: string, register
   const cookieStore = await cookies();
   cookieStore.set(TERMINAL_COOKIE_NAME, token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    secure: cookieSecure(),
     sameSite: "strict",
     path: "/",
     expires: new Date(Date.now() + TERMINAL_COOKIE_TTL_MS),

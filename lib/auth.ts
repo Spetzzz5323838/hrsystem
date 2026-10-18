@@ -1,3 +1,4 @@
+import { cookieSecure } from "./cookieSecurity";
 import argon2 from "argon2";
 import { createHash, randomBytes, randomInt } from "node:crypto";
 import { cookies } from "next/headers";
@@ -57,7 +58,7 @@ export async function createSession(personId: number) {
   const cookieStore = await cookies();
   cookieStore.set(SESSION_COOKIE_NAME, token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    secure: cookieSecure(),
     sameSite: "strict",
     path: "/",
     expires: expiresAt,
@@ -120,7 +121,7 @@ export async function markTrustedDevice(personId: number): Promise<void> {
   const cookieStore = await cookies();
   cookieStore.set(TRUSTED_DEVICE_COOKIE_NAME, token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    secure: cookieSecure(),
     sameSite: "strict",
     path: "/",
     expires: expiresAt,
