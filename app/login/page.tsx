@@ -13,6 +13,14 @@ export default function LoginPage() {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const afterLogin = () => {
+    // ?next=/terminal — повернення туди, звідки викинуло на вхід (термінал
+    // обліку часу); лише внутрішні шляхи, щоб не зробити відкритий редірект.
+    const next = new URLSearchParams(window.location.search).get("next");
+    if (next && next.startsWith("/") && !next.startsWith("//")) {
+      router.push(next);
+      router.refresh();
+      return Promise.resolve();
+    }
     return fetch("/api/me")
       .then((r) => (r.ok ? r.json() : null))
       .then((me) => {

@@ -96,6 +96,11 @@ enum Capability {
   /// Оголошення й опитування (з розмови 2026-09-24, поза докс) — область
   /// дії визначає, на який вузол дерева можна надіслати.
   MANAGE_ANNOUNCEMENTS
+  /// Термінал обліку робочого часу (2026-10-18): відкривати /terminal і
+  /// реєструвати прибуття/завершення зміни — старший касир, адміністратор.
+  OPERATE_TERMINAL
+  /// Реєстрація/відкликання комп'ютерів-терміналів — сисадмін, COO, директор кластера.
+  MANAGE_TERMINALS
 }
 
 enum EmploymentStatus {
@@ -229,6 +234,8 @@ model OrgNode {
   roleAssignments           RoleAssignment[]
   equipment                 Equipment[]
   pendingHires              PendingHire[]
+  terminals                 Terminal[]
+  workShifts                WorkShift[]
   announcements             Announcement[]
   polls                     Poll[]
 
@@ -261,21 +268,21 @@ model PendingHire {
 /// Телефон — природний ключ для входу й пошуку, але не первинний ключ:
 /// номери змінюються й повторно продаються операторами (docs v1.2 §5).
 model Person {
-  id              Int       @id @default(autoincrement())
-  fullName        String
-  birthDate       DateTime?
-  telegramId      BigInt?   @unique
-  phone           String    @unique
-  email           String?
-  phoneVerifiedAt DateTime?
-  passwordHash    String?
-  externalRef     String?
+  id                Int       @id @default(autoincrement())
+  fullName          String
+  birthDate         DateTime?
+  telegramId        BigInt?   @unique
+  phone             String    @unique
+  email             String?
+  phoneVerifiedAt   DateTime?
+  passwordHash      String?
+  externalRef       String?
   /// Код працівника для бейджа й обліку робочого часу (2026-10-18) — не
   /// секрет, випадкові цифри (не послідовні), генерує lib/badgeCode.ts.
   /// Перевидача (загублений бейдж) робить старий код недійсним.
   badgeCode         String?   @unique
   badgeCodeIssuedAt DateTime?
-  createdAt       DateTime  @default(now())
+  createdAt         DateTime  @default(now())
 
   employments       Employment[]
   competencyRecords CompetencyRecord[]
@@ -426,6 +433,10 @@ model Employment {
   curatorEligibilities        CuratorEligibility[] @relation("CuratorEligibilities")
   grantedCuratorEligibilities CuratorEligibility[] @relation("CuratorEligibilityGrantedBy")
   createdVacancies            Vacancy[]            @relation("VacancyCreatedBy")
+  registeredTerminals         Terminal[]           @relation("TerminalRegisteredBy")
+  workShiftsOf                WorkShift[]          @relation("WorkShiftEmployment")
+  scanEventsAsEmployee        ScanEvent[]          @relation("ScanEventEmployment")
+  scanEventsAsOperator        ScanEvent[]          @relation("ScanEventOperator")
   closedVacancies             Vacancy[]            @relation("VacancyClosedBy")
   authoredAnnouncements       Announcement[]       @relation("AnnouncementAuthor")
   authoredPolls               Poll[]               @relation("PollAuthor")
@@ -692,11 +703,11 @@ model Competency {
   resetOnBreakMonths Int?
   isBonus            Boolean @default(false)
 
-  positionCompetencies    PositionCompetency[]
-  records                 CompetencyRecord[]
-  materials               Material[]
-  checklistItemTemplates  ChecklistItemTemplate[]
-  attestationScores       AttestationCompetencyScore[]
+  positionCompetencies   PositionCompetency[]
+  records                CompetencyRecord[]
+  materials              Material[]
+  checklistItemTemplates ChecklistItemTemplate[]
+  attestationScores      AttestationCompetencyScore[]
 }
 
 /// Що вимагає профіль посади. isRequired розрізняє обов'язкову й
@@ -738,26 +749,26 @@ model CompetencyRecord {
 /// не потрібно. Відео — тільки через intranet, PDF можна й через бот
 /// (docs hr-system-plan-v1.md §9.1).
 model Material {
-  id           Int          @id @default(autoincrement())
-  competencyId Int
-  competency   Competency   @relation(fields: [competencyId], references: [id])
-  title        String
-  type         MaterialType
-  url          String?
-  filePath     String?
+  id                 Int          @id @default(autoincrement())
+  competencyId       Int
+  competency         Competency   @relation(fields: [competencyId], references: [id])
+  title              String
+  type               MaterialType
+  url                String?
+  filePath           String?
   /// Ім'я й MIME-тип завантаженого файлу (для видачі — Content-Disposition/
   /// Content-Type) — заповнюються лише для filePath-матеріалів, не для url.
-  originalName String?
-  mimeType     String?
-  durationMin  Int?
-  sendViaBot   Boolean      @default(false)
+  originalName       String?
+  mimeType           String?
+  durationMin        Int?
+  sendViaBot         Boolean      @default(false)
   /// Легкий журнал версій (2026-09-27) — не зберігає самі старі файли
   /// (замінюються фізично, lib/materials.ts::replaceMaterialFile), лише
   /// коли й ким востаннє замінено вміст; null = від створення не замінювали.
   /// Повна історія замін — AuditLog(entityType="Material", action="material.contentReplaced").
   contentUpdatedAt   DateTime?
   contentUpdatedById Int?
-  contentUpdatedBy   Employment? @relation("MaterialContentUpdatedBy", fields: [contentUpdatedById], references: [id])
+  contentUpdatedBy   Employment?  @relation("MaterialContentUpdatedBy", fields: [contentUpdatedById], references: [id])
 
   @@index([competencyId])
 }
@@ -1222,4 +1233,83 @@ model EquipmentEvent {
   @@index([equipmentId])
   @@index([employmentId])
   @@index([processInstanceId])
+}
+
+/// Комп'ютер-термінал обліку робочого часу (2026-10-18). Токен лежить у
+/// httpOnly-cookie комп'ютера, у базі — лише хеш; магазин береться з
+/// терміналу, а не з вибору касира. revokedAt — відкликаний сисадміном.
+/// lastSeenAt оновлюється кожним запитом терміналу (контроль "мовчання",
+/// етап 4).
+model Terminal {
+  id             Int        @id @default(autoincrement())
+  orgNodeId      Int
+  orgNode        OrgNode    @relation(fields: [orgNodeId], references: [id])
+  name           String
+  tokenHash      String     @unique
+  registeredById Int
+  registeredBy   Employment @relation("TerminalRegisteredBy", fields: [registeredById], references: [id])
+  createdAt      DateTime   @default(now())
+  lastSeenAt     DateTime?
+  revokedAt      DateTime?
+
+  scanEvents  ScanEvent[]
+  startShifts WorkShift[] @relation("WorkShiftStartTerminal")
+  endShifts   WorkShift[] @relation("WorkShiftEndTerminal")
+
+  @@index([orgNodeId])
+}
+
+enum ScanAction {
+  ARRIVAL
+  DEPARTURE
+}
+
+enum ShiftCloseKind {
+  TERMINAL
+  MANUAL
+  AUTO
+}
+
+/// Робоча зміна: від прибуття до завершення. orgNodeId — магазин, де
+/// зміну розпочато. endedAt = null — зміна відкрита.
+model WorkShift {
+  id              Int             @id @default(autoincrement())
+  employmentId    Int
+  employment      Employment      @relation("WorkShiftEmployment", fields: [employmentId], references: [id])
+  orgNodeId       Int
+  orgNode         OrgNode         @relation(fields: [orgNodeId], references: [id])
+  startedAt       DateTime
+  endedAt         DateTime?
+  startTerminalId Int?
+  startTerminal   Terminal?       @relation("WorkShiftStartTerminal", fields: [startTerminalId], references: [id])
+  endTerminalId   Int?
+  endTerminal     Terminal?       @relation("WorkShiftEndTerminal", fields: [endTerminalId], references: [id])
+  closeKind       ShiftCloseKind?
+
+  scanEvents ScanEvent[]
+
+  @@index([employmentId, endedAt])
+  @@index([orgNodeId, startedAt])
+}
+
+/// Підтверджене касиром сканування. clientEventId (UUID від терміналу) —
+/// ключ ідемпотентності: повторна відправка тієї ж події (подвійний клік,
+/// офлайн-черга на етапі 4) не створює другого запису. scannedAt — коли
+/// відскановано, receivedAt — коли дійшло до сервера.
+model ScanEvent {
+  id            Int        @id @default(autoincrement())
+  clientEventId String     @unique
+  employmentId  Int
+  employment    Employment @relation("ScanEventEmployment", fields: [employmentId], references: [id])
+  terminalId    Int
+  terminal      Terminal   @relation(fields: [terminalId], references: [id])
+  operatorId    Int
+  operator      Employment @relation("ScanEventOperator", fields: [operatorId], references: [id])
+  action        ScanAction
+  scannedAt     DateTime
+  receivedAt    DateTime   @default(now())
+  shiftId       Int
+  shift         WorkShift  @relation(fields: [shiftId], references: [id])
+
+  @@index([employmentId, scannedAt])
 }

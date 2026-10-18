@@ -369,8 +369,14 @@ const ACCESS_PROFILES: AccessProfileSeed[] = [
       Capability.PRINT_BADGE,
       Capability.MANAGE_VACANCIES,
       Capability.MANAGE_ANNOUNCEMENTS,
+      Capability.OPERATE_TERMINAL,
     ],
   },
+  // Облік робочого часу (2026-10-18): працювати з терміналом (старший касир
+  // — окремим профілем, бо інших прав "Повного управління" йому не треба)
+  // і керувати самими терміналами (сисадмін, директор кластера; COO — через "Повний доступ").
+  { name: "Робота з терміналом", capabilities: [Capability.OPERATE_TERMINAL] },
+  { name: "Керування терміналами", capabilities: [Capability.MANAGE_TERMINALS] },
   { name: "Аналітика", capabilities: [Capability.VIEW_ANALYTICS] },
   { name: "Погодження переведення", capabilities: [Capability.APPROVE_TRANSFER] },
   { name: "Перегляд і оцінка підлеглих", capabilities: [Capability.VIEW_EMPLOYEE, Capability.RATE_POSITIVE_NEGATIVE] },
@@ -431,6 +437,13 @@ const explicitAssignments: Record<string, AssignmentSeed[]> = {
 // Рівень 20 без явного рядка в матриці: раніше один "кошик" мішав дві різні
 // області (відділ для перегляду, підлеглі для оцінки) — тепер це рівно два
 // призначення з різною областю замість штучного одного профілю.
+// Додаткові призначення поверх рівневих/явних (не замінюють їх).
+const extraAssignments: Record<string, AssignmentSeed[]> = {
+  "Старший касир": [{ profileName: "Робота з терміналом", scope: ScopeType.OWN_OBJECT }],
+  "Системний адміністратор": [{ profileName: "Керування терміналами", scope: ScopeType.COMPANY }],
+  "Директор кластера": [{ profileName: "Керування терміналами", scope: ScopeType.OWN_SUBTREE }],
+};
+
 const SHIFT_LEAD_ASSIGNMENTS: AssignmentSeed[] = [
   { profileName: "Перегляд власного профілю", scope: ScopeType.OWN_DEPARTMENT },
   { profileName: "Керівництво зміною", scope: ScopeType.SUBORDINATES },
@@ -472,9 +485,10 @@ async function seedPositionAccessAssignments(profileIdByName: Map<string, number
       else if (position.level === 10 || position.level === 15) assignments = SELF_VIEW_ASSIGNMENTS;
     }
 
-    if (!assignments) continue;
+    const extra = extraAssignments[position.title] ?? [];
+    if (!assignments && !extra.length) continue;
 
-    for (const a of assignments) {
+    for (const a of [...(assignments ?? []), ...extra]) {
       const accessProfileId = profileIdByName.get(a.profileName);
       if (!accessProfileId) continue;
 
