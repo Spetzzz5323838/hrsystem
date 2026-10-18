@@ -9,6 +9,7 @@ import { runPeriodicBadgeChecks } from "../lib/badges-periodic";
 import { cleanupExpiredDocuments } from "../lib/document-retention";
 import { checkDueReminders } from "../lib/reminders";
 import { autoCloseStaleShifts } from "../lib/timesheet";
+import { checkSilentTerminals } from "../lib/terminal";
 import { listAnnouncementsForPerson } from "../lib/announcements";
 import { castVote, closeExpiredPolls } from "../lib/polls";
 import { acknowledgeReview } from "../lib/review";
@@ -606,6 +607,7 @@ const BADGE_CHECK_QUEUE = "periodic-badge-check";
 const DOCUMENT_RETENTION_QUEUE = "document-retention-cleanup";
 const REMINDER_DUE_QUEUE = "reminder-due-check";
 const POLL_CLOSE_QUEUE = "poll-close-check";
+const TERMINAL_SILENCE_QUEUE = "terminal-silence-check";
 const SHIFT_AUTOCLOSE_QUEUE = "shift-autoclose-check";
 
 /**
@@ -659,6 +661,13 @@ async function setupQueue() {
   // Щогодини, не раз на ніч: правило те саме (зміна >16 год), але комп'ютери
   // на касах вимикають на ніч, і адмін дізнається про "забуту" зміну швидше.
   await boss.schedule(SHIFT_AUTOCLOSE_QUEUE, "10 * * * *");
+
+  await boss.createQueue(TERMINAL_SILENCE_QUEUE);
+  await boss.work(TERMINAL_SILENCE_QUEUE, async () => {
+    const { alerted } = await checkSilentTerminals();
+    if (alerted > 0) console.log(`Термінали, що мовчать: ${alerted}.`);
+  });
+  await boss.schedule(TERMINAL_SILENCE_QUEUE, "20 * * * *");
 
   await boss.createQueue(POLL_CLOSE_QUEUE);
   await boss.work(POLL_CLOSE_QUEUE, () => closeExpiredPolls());

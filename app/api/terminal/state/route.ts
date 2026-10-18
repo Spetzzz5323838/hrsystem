@@ -9,6 +9,7 @@ export async function GET() {
     terminalName: auth.terminal.name,
     storeName: auth.terminal.orgNode.name,
     operatorName: auth.operatorName,
+    serverTime: new Date().toISOString(),
     onShift: await listOnShift(auth.terminal.orgNodeId),
   });
 }

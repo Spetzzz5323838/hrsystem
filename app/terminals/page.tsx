@@ -10,12 +10,24 @@ type TerminalRow = {
   registeredByName: string;
   createdAt: string;
   lastSeenAt: string | null;
+  pendingCount: number;
   revokedAt: string | null;
 };
 type ListResponse = { objects: { id: number; name: string }[]; terminals: TerminalRow[] };
 
 function fmt(iso: string | null): string {
   return iso ? new Date(iso).toLocaleString("uk-UA", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—";
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** Зелений — озвався недавно; сірий — вимкнений (на ніч це нормально); червоний — мовчить 3 дні й більше. */
+function status(t: TerminalRow): { color: string; label: string } {
+  const last = new Date(t.lastSeenAt ?? t.createdAt).getTime();
+  const age = Date.now() - last;
+  if (age < 5 * 60 * 1000) return { color: "bg-emerald-500", label: "на зв’язку" };
+  if (age < 3 * DAY_MS) return { color: "bg-slate-300", label: "не на зв’язку" };
+  return { color: "bg-rose-500", label: "мовчить 3+ дні" };
 }
 
 export default function TerminalsPage() {
@@ -153,7 +165,20 @@ export default function TerminalsPage() {
                   <td className="px-4 py-2">
                     {t.registeredByName} <span className="text-xs text-slate-400">· {fmt(t.createdAt)}</span>
                   </td>
-                  <td className="px-4 py-2">{t.revokedAt ? `відкликано ${fmt(t.revokedAt)}` : fmt(t.lastSeenAt)}</td>
+                  <td className="px-4 py-2">
+                    {t.revokedAt ? (
+                      `відкликано ${fmt(t.revokedAt)}`
+                    ) : (
+                      <span className="flex flex-wrap items-center gap-2">
+                        <span className={`inline-block h-2.5 w-2.5 rounded-full ${status(t).color}`} title={status(t).label} />
+                        {fmt(t.lastSeenAt)}
+                        <span className="text-xs text-slate-400">{status(t).label}</span>
+                        {t.pendingCount > 0 && (
+                          <span className="rounded bg-amber-50 px-1.5 py-0.5 text-xs text-amber-800">не відправлено: {t.pendingCount}</span>
+                        )}
+                      </span>
+                    )}
+                  </td>
                   <td className="px-4 py-2 text-right">
                     {!t.revokedAt && (
                       <button onClick={() => revoke(t)} className="text-xs text-rose-600 hover:text-rose-800">

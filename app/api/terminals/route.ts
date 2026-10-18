@@ -30,6 +30,7 @@ export async function GET() {
         registeredByName: t.registeredBy.person.fullName,
         createdAt: t.createdAt,
         lastSeenAt: t.lastSeenAt,
+        pendingCount: t.lastPendingCount,
         revokedAt: t.revokedAt,
       })),
   });

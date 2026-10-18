@@ -1249,6 +1249,10 @@ model Terminal {
   createdAt      DateTime   @default(now())
   lastSeenAt     DateTime?
   revokedAt      DateTime?
+  /// Скільки відміток чекає відправки на самому комп'ютері (офлайн-черга) — з останнього сигналу.
+  lastPendingCount Int       @default(0)
+  /// Коли надіслано алерт "термінал мовчить"; скидається, щойно термінал озвався.
+  silenceAlertedAt DateTime?
 
   scanEvents  ScanEvent[]
   startShifts WorkShift[] @relation("WorkShiftStartTerminal")
