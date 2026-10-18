@@ -382,6 +382,9 @@ const ACCESS_PROFILES: AccessProfileSeed[] = [
   { name: "Керування терміналами", capabilities: [Capability.MANAGE_TERMINALS] },
   // Етап 5: довідник типів ділянок — лише сисадмін (COO має "Повний доступ").
   { name: "Типи ділянок", capabilities: [Capability.MANAGE_AREA_TYPES] },
+  // Етап 6: регламент обходів — сисадмін (COO має "Повний доступ"); розклад — ще й директор кластера.
+  { name: "Регламент обходів", capabilities: [Capability.MANAGE_REGULATION, Capability.MANAGE_INSPECTION_SCHEDULE] },
+  { name: "Розклад обходів", capabilities: [Capability.MANAGE_INSPECTION_SCHEDULE] },
   { name: "Аналітика", capabilities: [Capability.VIEW_ANALYTICS] },
   { name: "Погодження переведення", capabilities: [Capability.APPROVE_TRANSFER] },
   { name: "Перегляд і оцінка підлеглих", capabilities: [Capability.VIEW_EMPLOYEE, Capability.RATE_POSITIVE_NEGATIVE] },
@@ -449,8 +452,12 @@ const extraAssignments: Record<string, AssignmentSeed[]> = {
   "Системний адміністратор": [
     { profileName: "Керування терміналами", scope: ScopeType.COMPANY },
     { profileName: "Типи ділянок", scope: ScopeType.COMPANY },
+    { profileName: "Регламент обходів", scope: ScopeType.COMPANY },
   ],
-  "Директор кластера": [{ profileName: "Керування терміналами", scope: ScopeType.OWN_SUBTREE }],
+  "Директор кластера": [
+    { profileName: "Керування терміналами", scope: ScopeType.OWN_SUBTREE },
+    { profileName: "Розклад обходів", scope: ScopeType.OWN_SUBTREE },
+  ],
 };
 
 const SHIFT_LEAD_ASSIGNMENTS: AssignmentSeed[] = [
@@ -979,6 +986,39 @@ async function seedAreaTypes() {
   }
 }
 
+// Стартовий регламент обходів (етап 6): лише якщо регламенту ще немає. Це
+// заготовка для старту — сисадмін/COO переписують її в /regulation (нова версія).
+async function seedRegulation() {
+  if ((await prisma.regulationVersion.count()) > 0) return;
+  const areaType = async (name: string) => (await prisma.areaType.findUnique({ where: { name } }))?.id ?? null;
+  const position = async (title: string) => (await prisma.positionProfile.findFirst({ where: { title } }))?.id ?? null;
+  type Seed = { text: string; target: "GENERAL" | "AREA" | "PERSON"; areaType?: string; position?: string; inDaily?: boolean };
+  const seeds: Seed[] = [
+    { text: "Вхідна група чиста: підлога, двері, скло, немає сміття", target: "GENERAL", areaType: "Вхідна група", inDaily: true },
+    { text: "Освітлення працює, перегорілих ламп немає", target: "GENERAL", areaType: "Освітлення", inDaily: true },
+    { text: "Торговий зал: підлога чиста, товар не стоїть на підлозі", target: "GENERAL", areaType: "Торговий зал", inDaily: true },
+    { text: "Вітрина охайна, товар викладено за стандартом", target: "AREA", areaType: "Гастроном" },
+    { text: "Цінники відповідають товару й ціні в касі", target: "AREA", areaType: "Гастроном", inDaily: true },
+    { text: "Немає товару з простроченим терміном придатності", target: "AREA", areaType: "Гастроном", inDaily: true },
+    { text: "Температура в холодильному обладнанні в нормі", target: "AREA", areaType: "Молочка", inDaily: true },
+    { text: "Немає товару з простроченим терміном придатності", target: "AREA", areaType: "Молочка", inDaily: true },
+    { text: "Вітрина свіжа й охайна, цінники на місці", target: "AREA", areaType: "Кондитерка" },
+    { text: "Робоче місце на касі чисте й охайне", target: "AREA", areaType: "Каси" },
+    { text: "Охайний зовнішній вигляд, форма за стандартом", target: "PERSON", position: "Касир" },
+    { text: "Привітний тон спілкування з покупцем", target: "PERSON", position: "Касир", inDaily: true },
+    { text: "Охайний зовнішній вигляд, форма за стандартом", target: "PERSON", position: "Продавець" },
+    { text: "Привітний тон спілкування з покупцем", target: "PERSON", position: "Продавець" },
+  ];
+  const items = [];
+  for (const [i, s] of seeds.entries()) {
+    const areaTypeId = s.target === "AREA" ? await areaType(s.areaType!) : null;
+    const positionProfileId = s.target === "PERSON" ? await position(s.position!) : null;
+    if ((s.target === "AREA" && !areaTypeId) || (s.target === "PERSON" && !positionProfileId)) continue;
+    items.push({ sortOrder: i + 1, text: s.text, target: s.target, areaTypeId, positionProfileId, inDaily: s.inDaily === true });
+  }
+  await prisma.regulationVersion.create({ data: { version: 1, isCurrent: true, note: "Стартова заготовка", items: { create: items } } });
+}
+
 async function seedFreezeReasons() {
   for (const r of freezeReasons) {
     await prisma.freezeReason.upsert({
@@ -1352,6 +1392,11 @@ const notificationTemplates: { key: string; description: string; text: string }[
     text: "{{storeName}}: магазин відкрито о {{openTime}}, а на ділянках немає людей:\n{{list}}\n\nПеревірте, чи вийшли працівники, і за потреби призначте заміну.",
   },
   {
+    key: "inspection.postponed",
+    description: "Адміну магазину, директору кластера й COO — обхід не проведено, перенесено на наступний день",
+    text: "{{storeName}}: {{kind}} обхід, запланований на {{was}}, не проведено. Перенесено на {{next}}.",
+  },
+  {
     key: "reminder.due",
     description: "Автору особистого нагадування — настав термін",
     text: "Нагадування про {{fullName}}: «{{text}}».",
@@ -1427,6 +1472,7 @@ async function main() {
 
   console.log("Типи ділянок...");
   await seedAreaTypes();
+  await seedRegulation();
 
   console.log("Шаблони сповіщень...");
   await seedNotificationTemplates();

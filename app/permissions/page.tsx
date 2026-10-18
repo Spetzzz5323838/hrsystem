@@ -34,6 +34,8 @@ const CAPABILITY_LABELS: Record<string, string> = {
   MANAGE_TERMINALS: "Керування терміналами",
   MANAGE_AREA_TYPES: "Типи ділянок (довідник мережі)",
   MANAGE_AREAS: "Ділянки магазину й відповідальні",
+  MANAGE_REGULATION: "Регламент обходів (спільний на мережу)",
+  MANAGE_INSPECTION_SCHEDULE: "Розклад обходів магазинів",
   CLOSE_INTERNSHIP: "Закриття стажування",
   RUN_ATTESTATION: "Приймання атестації",
   RATE_POSITIVE_NEGATIVE: "Оцінка позитив/негатив",

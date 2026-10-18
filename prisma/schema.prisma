@@ -109,6 +109,10 @@ enum Capability {
   MANAGE_AREA_TYPES
   /// Ділянки конкретного магазину, відповідальні, час відкриття — адмін свого магазину, директор кластера, COO.
   MANAGE_AREAS
+  /// Регламент обходів (спільний на мережу, з версіями) — сисадмін і COO.
+  MANAGE_REGULATION
+  /// Розклад обходів конкретних магазинів — сисадмін, COO, директор кластера (свої магазини).
+  MANAGE_INSPECTION_SCHEDULE
 }
 
 enum EmploymentStatus {
@@ -245,13 +249,15 @@ model OrgNode {
   terminals                 Terminal[]
   workShifts                WorkShift[]
   areas                     Area[]
+  inspectionSchedule        InspectionSchedule?
+  inspections               Inspection[]
 
   /// Час відкриття магазину "ГГ:ХХ" (етап 5) — від нього через 30 хв перевіряється, чи є персонал на ділянках. Порожньо — перевірки немає.
   openTime          String?
   /// Дата, коли перевірку "ділянка без персоналу" вже зроблено (раз на добу).
-  staffingCheckedOn DateTime? @db.Date
-  announcements             Announcement[]
-  polls                     Poll[]
+  staffingCheckedOn DateTime?      @db.Date
+  announcements     Announcement[]
+  polls             Poll[]
 
   @@index([path])
 }
@@ -401,10 +407,13 @@ model Employment {
   terminationReason     TerminationReason? @relation(fields: [terminationReasonCode], references: [code])
   lastWorkingDay        DateTime?
 
-  managerId    Int?
-  manager      Employment?  @relation("EmploymentManager", fields: [managerId], references: [id])
-  subordinates Employment[] @relation("EmploymentManager")
-  areaResponsibilities AreaResponsible[] @relation("AreaResponsibleEmployment")
+  managerId                  Int?
+  manager                    Employment?          @relation("EmploymentManager", fields: [managerId], references: [id])
+  subordinates               Employment[]         @relation("EmploymentManager")
+  areaResponsibilities       AreaResponsible[]    @relation("AreaResponsibleEmployment")
+  regulationVersionsCreated  RegulationVersion[]  @relation("RegulationVersionCreatedBy")
+  inspectionSchedulesUpdated InspectionSchedule[] @relation("InspectionScheduleUpdatedBy")
+  inspectionsConducted       Inspection[]         @relation("InspectionConductedBy")
 
   /// Куратор — призначається пунктом чек-ліста онбордингу "Призначення
   /// куратора" (docs hr-system-plan-v1.md §8, п.2). Раніше було null-заглушкою
@@ -497,6 +506,7 @@ model PositionProfile {
   positionCompetencies   PositionCompetency[]
   reviewCriterionWeights ReviewCriterionWeight[]
   curatorEligibilities   CuratorEligibility[]
+  regulationItems        RegulationItem[]
 }
 
 /// Кураторство "з людини" (правки 20.09.2026, п.9) — точніший, per-людина
@@ -1250,18 +1260,18 @@ model EquipmentEvent {
 /// lastSeenAt оновлюється кожним запитом терміналу (контроль "мовчання",
 /// етап 4).
 model Terminal {
-  id             Int        @id @default(autoincrement())
-  orgNodeId      Int
-  orgNode        OrgNode    @relation(fields: [orgNodeId], references: [id])
-  name           String
-  tokenHash      String     @unique
-  registeredById Int
-  registeredBy   Employment @relation("TerminalRegisteredBy", fields: [registeredById], references: [id])
-  createdAt      DateTime   @default(now())
-  lastSeenAt     DateTime?
-  revokedAt      DateTime?
+  id               Int        @id @default(autoincrement())
+  orgNodeId        Int
+  orgNode          OrgNode    @relation(fields: [orgNodeId], references: [id])
+  name             String
+  tokenHash        String     @unique
+  registeredById   Int
+  registeredBy     Employment @relation("TerminalRegisteredBy", fields: [registeredById], references: [id])
+  createdAt        DateTime   @default(now())
+  lastSeenAt       DateTime?
+  revokedAt        DateTime?
   /// Скільки відміток чекає відправки на самому комп'ютері (офлайн-черга) — з останнього сигналу.
-  lastPendingCount Int       @default(0)
+  lastPendingCount Int        @default(0)
   /// Коли надіслано алерт "термінал мовчить"; скидається, щойно термінал озвався.
   silenceAlertedAt DateTime?
 
@@ -1344,7 +1354,8 @@ model AreaType {
   isActive      Boolean  @default(true)
   createdAt     DateTime @default(now())
 
-  areas Area[]
+  areas           Area[]
+  regulationItems RegulationItem[]
 }
 
 /// Ділянка конкретного магазину/цеху/складу — не вузол оргдерева.
@@ -1372,4 +1383,93 @@ model AreaResponsible {
   assignedAt   DateTime   @default(now())
 
   @@unique([areaId, employmentId])
+}
+
+enum RegulationTarget {
+  /// Загальний стан магазину (вхідна група, освітлення, торговий зал)
+  GENERAL
+  /// Ділянка певного типу — оцінюється кожна такого типу ділянка магазину
+  AREA
+  /// Індивідуально кожен працівник певної посади (вигляд, тон спілкування)
+  PERSON
+}
+
+enum InspectionKind {
+  DAILY
+  WEEKLY
+}
+
+enum InspectionStatus {
+  PLANNED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+/// Версія регламенту обходів. Регламент один на мережу; редагування створює
+/// нову версію, обхід прив'язується до версії в момент початку й не ламається.
+model RegulationVersion {
+  id          Int         @id @default(autoincrement())
+  version     Int         @unique
+  isCurrent   Boolean     @default(false)
+  note        String?
+  createdById Int?
+  createdBy   Employment? @relation("RegulationVersionCreatedBy", fields: [createdById], references: [id])
+  createdAt   DateTime    @default(now())
+
+  items       RegulationItem[]
+  inspections Inspection[]
+}
+
+/// Вимога регламенту. У щоденний обхід потрапляють лише вимоги з inDaily
+/// (критичні); щотижневий — детальний, включає всі вимоги.
+model RegulationItem {
+  id                Int               @id @default(autoincrement())
+  versionId         Int
+  version           RegulationVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  sortOrder         Int
+  text              String
+  target            RegulationTarget
+  areaTypeId        Int?
+  areaType          AreaType?         @relation(fields: [areaTypeId], references: [id])
+  positionProfileId Int?
+  positionProfile   PositionProfile?  @relation(fields: [positionProfileId], references: [id])
+  inDaily           Boolean           @default(false)
+
+  @@index([versionId])
+}
+
+/// Розклад обходів магазину: щоденний о dailyTime, щотижневий у weeklyDay (1=пн…7=нд) о weeklyTime.
+model InspectionSchedule {
+  id          Int         @id @default(autoincrement())
+  orgNodeId   Int         @unique
+  orgNode     OrgNode     @relation(fields: [orgNodeId], references: [id])
+  dailyTime   String?
+  weeklyDay   Int?
+  weeklyTime  String?
+  updatedAt   DateTime    @updatedAt
+  updatedById Int?
+  updatedBy   Employment? @relation("InspectionScheduleUpdatedBy", fields: [updatedById], references: [id])
+}
+
+/// Конкретний обхід. Пропущений (день минув, а обхід не почато) переноситься
+/// на наступний день той самий час із повідомленням керівникам.
+model Inspection {
+  id                  Int                @id @default(autoincrement())
+  orgNodeId           Int
+  orgNode             OrgNode            @relation(fields: [orgNodeId], references: [id])
+  kind                InspectionKind
+  plannedFor          DateTime
+  originalPlannedFor  DateTime
+  postponedCount      Int                @default(0)
+  status              InspectionStatus   @default(PLANNED)
+  regulationVersionId Int?
+  regulationVersion   RegulationVersion? @relation(fields: [regulationVersionId], references: [id])
+  conductedById       Int?
+  conductedBy         Employment?        @relation("InspectionConductedBy", fields: [conductedById], references: [id])
+  startedAt           DateTime?
+  completedAt         DateTime?
+  createdAt           DateTime           @default(now())
+
+  @@index([orgNodeId, status])
 }
