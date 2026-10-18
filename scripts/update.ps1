@@ -5,7 +5,9 @@
 # Зупиняється на першій помилці. Бекап лежить у папці backups\ (зберігаються останні 14).
 # Сервер завжди оновлюється з гілки master; розробка йде в гілці dev (див. docs/deployment.md).
 
-$ErrorActionPreference = "Stop"
+# Continue, не Stop: у Windows PowerShell 5.1 будь-який текст у stderr від git/npm (навіть інформаційний) інакше обривав би скрипт.
+# Помилки команд перевіряються явно через $LASTEXITCODE.
+$ErrorActionPreference = "Continue"
 Set-Location (Split-Path -Parent $PSScriptRoot)
 
 function Step($text) { Write-Host ""; Write-Host "==> $text" -ForegroundColor Cyan }
