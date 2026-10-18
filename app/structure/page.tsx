@@ -278,6 +278,7 @@ export default function StructurePage() {
   const [newSuPlanned, setNewSuPlanned] = useState("1");
   const [suError, setSuError] = useState<string | null>(null);
   const [suBusyId, setSuBusyId] = useState<number | "new" | null>(null);
+  const [vacancyCreatedForId, setVacancyCreatedForId] = useState<number | null>(null);
 
   const loadDirectStaffUnits = (nodeId: number) => {
     fetch(`/api/staff-units?orgNodeId=${nodeId}`)
@@ -541,8 +542,6 @@ export default function StructurePage() {
       .catch((e) => setSuError(e.message))
       .finally(() => setSuBusyId(null));
   };
-
-  const [vacancyCreatedForId, setVacancyCreatedForId] = useState<number | null>(null);
 
   const createVacancyForStaffUnit = (staffUnitId: number) => {
     setSuBusyId(staffUnitId);
