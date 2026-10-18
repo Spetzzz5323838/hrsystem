@@ -372,6 +372,7 @@ const ACCESS_PROFILES: AccessProfileSeed[] = [
       Capability.OPERATE_TERMINAL,
       Capability.VIEW_TIMESHEET,
       Capability.EDIT_SHIFTS,
+      Capability.MANAGE_AREAS,
     ],
   },
   // Облік робочого часу (2026-10-18): працювати з терміналом (старший касир
@@ -379,6 +380,8 @@ const ACCESS_PROFILES: AccessProfileSeed[] = [
   // і керувати самими терміналами (сисадмін, директор кластера; COO — через "Повний доступ").
   { name: "Робота з терміналом", capabilities: [Capability.OPERATE_TERMINAL] },
   { name: "Керування терміналами", capabilities: [Capability.MANAGE_TERMINALS] },
+  // Етап 5: довідник типів ділянок — лише сисадмін (COO має "Повний доступ").
+  { name: "Типи ділянок", capabilities: [Capability.MANAGE_AREA_TYPES] },
   { name: "Аналітика", capabilities: [Capability.VIEW_ANALYTICS] },
   { name: "Погодження переведення", capabilities: [Capability.APPROVE_TRANSFER] },
   { name: "Перегляд і оцінка підлеглих", capabilities: [Capability.VIEW_EMPLOYEE, Capability.RATE_POSITIVE_NEGATIVE] },
@@ -443,7 +446,10 @@ const explicitAssignments: Record<string, AssignmentSeed[]> = {
 // Додаткові призначення поверх рівневих/явних (не замінюють їх).
 const extraAssignments: Record<string, AssignmentSeed[]> = {
   "Старший касир": [{ profileName: "Робота з терміналом", scope: ScopeType.OWN_OBJECT }],
-  "Системний адміністратор": [{ profileName: "Керування терміналами", scope: ScopeType.COMPANY }],
+  "Системний адміністратор": [
+    { profileName: "Керування терміналами", scope: ScopeType.COMPANY },
+    { profileName: "Типи ділянок", scope: ScopeType.COMPANY },
+  ],
   "Директор кластера": [{ profileName: "Керування терміналами", scope: ScopeType.OWN_SUBTREE }],
 };
 
@@ -953,6 +959,26 @@ const freezeReasons: { code: string; name: string }[] = [
   { code: "SEASONAL_BREAK", name: "Сезонна перерва" },
 ];
 
+// Початковий довідник типів ділянок (етап 5, 2026-10-18). Лише створення:
+// сисадмін далі змінює список у /areas, seed його не перезаписує.
+const areaTypeSeeds = [
+  { name: "Гастроном", requiresStaff: true, isGeneral: false },
+  { name: "Молочка", requiresStaff: true, isGeneral: false },
+  { name: "Кондитерка", requiresStaff: true, isGeneral: false },
+  { name: "Каси", requiresStaff: true, isGeneral: false },
+  { name: "Вхідна група", requiresStaff: false, isGeneral: true },
+  { name: "Торговий зал", requiresStaff: false, isGeneral: true },
+  { name: "Освітлення", requiresStaff: false, isGeneral: true },
+];
+
+async function seedAreaTypes() {
+  let order = 10;
+  for (const t of areaTypeSeeds) {
+    await prisma.areaType.upsert({ where: { name: t.name }, update: {}, create: { ...t, sortOrder: order } });
+    order += 10;
+  }
+}
+
 async function seedFreezeReasons() {
   for (const r of freezeReasons) {
     await prisma.freezeReason.upsert({
@@ -1321,6 +1347,11 @@ const notificationTemplates: { key: string; description: string; text: string }[
     text: "Термінал «{{terminalName}}» ({{storeName}}) не виходив на зв'язок понад {{days}} дні: востаннє {{since}}.\nПеревірте комп'ютер: чи ввімкнений, чи є зв'язок з сервером (VPN). Поки термінал мовчить, відмітки можуть накопичуватися на самому комп'ютері.",
   },
   {
+    key: "area.unstaffed",
+    description: "Адміністратору магазину — через 30 хв після відкриття на ділянці немає персоналу",
+    text: "{{storeName}}: магазин відкрито о {{openTime}}, а на ділянках немає людей:\n{{list}}\n\nПеревірте, чи вийшли працівники, і за потреби призначте заміну.",
+  },
+  {
     key: "reminder.due",
     description: "Автору особистого нагадування — настав термін",
     text: "Нагадування про {{fullName}}: «{{text}}».",
@@ -1393,6 +1424,9 @@ async function main() {
 
   console.log("Обладнання...");
   await seedEquipment();
+
+  console.log("Типи ділянок...");
+  await seedAreaTypes();
 
   console.log("Шаблони сповіщень...");
   await seedNotificationTemplates();

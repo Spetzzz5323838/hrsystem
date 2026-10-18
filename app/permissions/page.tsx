@@ -32,6 +32,8 @@ const CAPABILITY_LABELS: Record<string, string> = {
   VIEW_TIMESHEET: "Перегляд табеля",
   EDIT_SHIFTS: "Виправлення табеля",
   MANAGE_TERMINALS: "Керування терміналами",
+  MANAGE_AREA_TYPES: "Типи ділянок (довідник мережі)",
+  MANAGE_AREAS: "Ділянки магазину й відповідальні",
   CLOSE_INTERNSHIP: "Закриття стажування",
   RUN_ATTESTATION: "Приймання атестації",
   RATE_POSITIVE_NEGATIVE: "Оцінка позитив/негатив",

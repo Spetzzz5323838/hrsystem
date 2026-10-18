@@ -10,6 +10,7 @@ import { cleanupExpiredDocuments } from "../lib/document-retention";
 import { checkDueReminders } from "../lib/reminders";
 import { autoCloseStaleShifts } from "../lib/timesheet";
 import { checkSilentTerminals } from "../lib/terminal";
+import { checkUnstaffedAreas } from "../lib/areas";
 import { listAnnouncementsForPerson } from "../lib/announcements";
 import { castVote, closeExpiredPolls } from "../lib/polls";
 import { acknowledgeReview } from "../lib/review";
@@ -607,6 +608,7 @@ const BADGE_CHECK_QUEUE = "periodic-badge-check";
 const DOCUMENT_RETENTION_QUEUE = "document-retention-cleanup";
 const REMINDER_DUE_QUEUE = "reminder-due-check";
 const POLL_CLOSE_QUEUE = "poll-close-check";
+const AREA_STAFFING_QUEUE = "area-staffing-check";
 const TERMINAL_SILENCE_QUEUE = "terminal-silence-check";
 const SHIFT_AUTOCLOSE_QUEUE = "shift-autoclose-check";
 
@@ -668,6 +670,13 @@ async function setupQueue() {
     if (alerted > 0) console.log(`Термінали, що мовчать: ${alerted}.`);
   });
   await boss.schedule(TERMINAL_SILENCE_QUEUE, "20 * * * *");
+
+  await boss.createQueue(AREA_STAFFING_QUEUE);
+  await boss.work(AREA_STAFFING_QUEUE, async () => {
+    const { alerted } = await checkUnstaffedAreas();
+    if (alerted > 0) console.log(`Ділянки без персоналу: повідомлено магазинів ${alerted}.`);
+  });
+  await boss.schedule(AREA_STAFFING_QUEUE, "*/10 * * * *");
 
   await boss.createQueue(POLL_CLOSE_QUEUE);
   await boss.work(POLL_CLOSE_QUEUE, () => closeExpiredPolls());

@@ -105,6 +105,10 @@ enum Capability {
   VIEW_TIMESHEET
   /// Ручне виправлення/додавання змін у табелі — з обов'язковою причиною й журналом.
   EDIT_SHIFTS
+  /// Довідник типів ділянок (етап 5) — сисадмін і COO.
+  MANAGE_AREA_TYPES
+  /// Ділянки конкретного магазину, відповідальні, час відкриття — адмін свого магазину, директор кластера, COO.
+  MANAGE_AREAS
 }
 
 enum EmploymentStatus {
@@ -240,6 +244,12 @@ model OrgNode {
   pendingHires              PendingHire[]
   terminals                 Terminal[]
   workShifts                WorkShift[]
+  areas                     Area[]
+
+  /// Час відкриття магазину "ГГ:ХХ" (етап 5) — від нього через 30 хв перевіряється, чи є персонал на ділянках. Порожньо — перевірки немає.
+  openTime          String?
+  /// Дата, коли перевірку "ділянка без персоналу" вже зроблено (раз на добу).
+  staffingCheckedOn DateTime? @db.Date
   announcements             Announcement[]
   polls                     Poll[]
 
@@ -394,6 +404,7 @@ model Employment {
   managerId    Int?
   manager      Employment?  @relation("EmploymentManager", fields: [managerId], references: [id])
   subordinates Employment[] @relation("EmploymentManager")
+  areaResponsibilities AreaResponsible[] @relation("AreaResponsibleEmployment")
 
   /// Куратор — призначається пунктом чек-ліста онбордингу "Призначення
   /// куратора" (docs hr-system-plan-v1.md §8, п.2). Раніше було null-заглушкою
@@ -1319,4 +1330,46 @@ model ScanEvent {
   shift         WorkShift  @relation(fields: [shiftId], references: [id])
 
   @@index([employmentId, scannedAt])
+}
+
+/// Тип ділянки (довідник мережі): Гастроном, Молочка, Каси, Вхідна група...
+model AreaType {
+  id            Int      @id @default(autoincrement())
+  name          String   @unique
+  /// Ділянка, де протягом зміни має бути персонал (прилавок, каса) — для алерту "ділянка без персоналу".
+  requiresStaff Boolean  @default(false)
+  /// Загальна ділянка без закріплених працівників (вхідна група, освітлення): порушення по ній іде директору кластера й COO.
+  isGeneral     Boolean  @default(false)
+  sortOrder     Int      @default(0)
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+
+  areas Area[]
+}
+
+/// Ділянка конкретного магазину/цеху/складу — не вузол оргдерева.
+model Area {
+  id         Int      @id @default(autoincrement())
+  orgNodeId  Int
+  orgNode    OrgNode  @relation(fields: [orgNodeId], references: [id])
+  areaTypeId Int
+  areaType   AreaType @relation(fields: [areaTypeId], references: [id])
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+
+  responsibles AreaResponsible[]
+
+  @@unique([orgNodeId, areaTypeId])
+}
+
+/// Відповідальний за ділянку; один працівник може відповідати за кілька ділянок.
+model AreaResponsible {
+  id           Int        @id @default(autoincrement())
+  areaId       Int
+  area         Area       @relation(fields: [areaId], references: [id], onDelete: Cascade)
+  employmentId Int
+  employment   Employment @relation("AreaResponsibleEmployment", fields: [employmentId], references: [id])
+  assignedAt   DateTime   @default(now())
+
+  @@unique([areaId, employmentId])
 }
