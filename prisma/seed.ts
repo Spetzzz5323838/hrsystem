@@ -1405,6 +1405,11 @@ const notificationTemplates: { key: string; description: string; text: string }[
     text: "🔴 {{storeName}}: порушення регламенту.\n{{where}}: {{text}}\nКоментар: {{comment}}\n\nПрийміть в роботу й виправте.",
   },
   {
+    key: "day.focus",
+    description: "Працівнику при прибутті на зміну — на що звернути увагу сьогодні (лише якщо є що сказати)",
+    text: "Доброго дня! Фокус на сьогодні:\n{{list}}",
+  },
+  {
     key: "reminder.due",
     description: "Автору особистого нагадування — настав термін",
     text: "Нагадування про {{fullName}}: «{{text}}».",

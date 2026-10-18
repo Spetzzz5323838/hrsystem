@@ -6,6 +6,7 @@ import { can, getEffectiveGrants } from "./permissions";
 import { getSessionPerson } from "./auth";
 import { resolveAssignee } from "./onboarding";
 import { sendNotification } from "./notificationTemplates";
+import { sendDayFocus } from "./dayFocus";
 import { Capability, EmploymentStatus, Role, ScanAction, ShiftCloseKind } from "../generated/prisma/client";
 
 /**
@@ -24,6 +25,8 @@ const DUPLICATE_WINDOW_MS = 10_000;
 const SHORT_SHIFT_MS = 30 * 60 * 1000;
 /** Термінал, що не озивався стільки, вважається "мовчить" (рішення 2026-10-18: 3 дні). */
 export const SILENCE_DAYS = 3;
+/** «Фокус дня» надсилається, лише якщо прибуття відмічено не раніше ніж за стільки. */
+const FOCUS_MAX_DELAY_MS = 2 * 60 * 60 * 1000;
 /** Відмітка з офлайн-черги: час з годинника комп'ютера може трохи випереджати сервер... */
 const QUEUED_FUTURE_TOLERANCE_MS = 5 * 60 * 1000;
 /** ...а надто стара відмітка — майже напевно помилка; такі виправляє адмін у табелі. */
@@ -244,6 +247,11 @@ export async function confirmScan(input: {
       },
     });
   });
+
+  // «Фокус дня» — лише на прибутті й лише якщо відмітка свіжа (офлайн-відмітка, що доїхала через пів дня, вже не вчасна).
+  if (lookup.action === ScanAction.ARRIVAL && now.getTime() - scannedAt.getTime() < FOCUS_MAX_DELAY_MS) {
+    sendDayFocus(lookup.employmentId, input.terminal.orgNodeId, now).catch((e) => console.error("Фокус дня не надіслано:", e));
+  }
 
   return { ok: true, duplicate: false, action: lookup.action, fullName: lookup.fullName };
 }
