@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, useEffect, useState } from "react";
+import Link from "next/link";
 import AppShell from "../components/AppShell";
 
 type Shift = {
@@ -138,6 +139,9 @@ export default function TimesheetPage() {
         </div>
 
         <div className="flex flex-wrap gap-2">
+          <Link href="/timesheet/report" className="rounded border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50">
+            Звіт по днях
+          </Link>
           <input type="month" value={month} onChange={(e) => e.target.value && setMonth(e.target.value)} className="rounded border border-slate-300 bg-white px-2 py-1.5 text-sm" />
           <select value={objectId} onChange={(e) => setObjectId(e.target.value)} className="rounded border border-slate-300 bg-white px-2 py-1.5 text-sm">
             <option value="">Усі магазини</option>

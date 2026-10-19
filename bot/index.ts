@@ -9,6 +9,7 @@ import { runPeriodicBadgeChecks } from "../lib/badges-periodic";
 import { cleanupExpiredDocuments } from "../lib/document-retention";
 import { checkDueReminders } from "../lib/reminders";
 import { autoCloseStaleShifts } from "../lib/timesheet";
+import { getPersonMonthMinutes } from "../lib/timesheetReport";
 import { checkSilentTerminals } from "../lib/terminal";
 import { checkUnstaffedAreas } from "../lib/areas";
 import { tickInspections } from "../lib/inspections";
@@ -119,13 +120,16 @@ bot.command("start", async (ctx) => {
   const payload = ctx.match?.toString().trim();
 
   if (!payload) {
+    const linked = await prisma.person.findUnique({ where: { telegramId: BigInt(ctx.from.id) } });
     await ctx.reply(
       "Вітаю! Це бот системи управління персоналом мережі «Коровай». Щоб зареєструватись, відскануйте QR-код на вашому об'єкті.\n\n" +
         "Якщо ви вже працюєте в компанії й хочете отримувати сповіщення сюди — напишіть /link.\n" +
         "Щоб подати заявку на відпустку — напишіть /vacation.\n" +
         "Щоб побачити задачі, що очікують вашої дії — напишіть /tasks.\n" +
         "Щоб скинути пароль кабінету — напишіть /password.\n" +
-        "Щоб побачити оголошення — напишіть /news.",
+        "Щоб побачити оголошення — напишіть /news.\n" +
+        "Щоб побачити відпрацьований час за місяць — напишіть /worktime.",
+      linked ? { reply_markup: mainMenu } : undefined,
     );
     return;
   }
@@ -174,7 +178,7 @@ bot.command("link", async (ctx) => {
   );
 });
 
-bot.command("tasks", async (ctx) => {
+async function showTasks(ctx: Context) {
   if (!ctx.from) return;
 
   const person = await prisma.person.findUnique({ where: { telegramId: BigInt(ctx.from.id) } });
@@ -198,9 +202,10 @@ bot.command("tasks", async (ctx) => {
       reply_markup: { inline_keyboard: [[{ text: buttonText, callback_data: `employee_task_done:${t.taskId}` }]] },
     });
   }
-});
+}
+bot.command("tasks", showTasks);
 
-bot.command("news", async (ctx) => {
+async function showNews(ctx: Context) {
   if (!ctx.from) return;
 
   const person = await prisma.person.findUnique({ where: { telegramId: BigInt(ctx.from.id) } });
@@ -218,9 +223,10 @@ bot.command("news", async (ctx) => {
   for (const a of announcements) {
     await ctx.reply(`📢 ${a.title}\n\n${a.body}\n\n— ${a.orgNode.name}, ${a.createdAt.toLocaleDateString("uk-UA")}`);
   }
-});
+}
+bot.command("news", showNews);
 
-bot.command("vacation", async (ctx) => {
+async function startVacation(ctx: Context) {
   if (!ctx.from) return;
 
   const person = await prisma.person.findUnique({ where: { telegramId: BigInt(ctx.from.id) } });
@@ -237,7 +243,57 @@ bot.command("vacation", async (ctx) => {
 
   vacationSessions.set(ctx.from.id, { step: "type", employmentId: employment.id });
   await ctx.reply("Яка відпустка?\n\n1 — Щорічна\n2 — За свій рахунок\n\nВведіть 1 або 2.");
+}
+bot.command("vacation", startVacation);
+
+// ── Відпрацьований час за поточний місяць (облік часу, docs v1.4). Лише години,
+// без розбивки по днях і без чужих даних: людина бачить тільки свої.
+const MONTHS_UK = ["січень", "лютий", "березень", "квітень", "травень", "червень", "липень", "серпень", "вересень", "жовтень", "листопад", "грудень"];
+
+async function showWorkTime(ctx: Context) {
+  if (!ctx.from) return;
+
+  const person = await prisma.person.findUnique({ where: { telegramId: BigInt(ctx.from.id) } });
+  if (!person) {
+    await ctx.reply("Спершу прив'яжіть Telegram до вашого акаунта — напишіть /link.");
+    return;
+  }
+
+  const now = new Date();
+  const { minutes, hasOpenShift } = await getPersonMonthMinutes(person.id, now.getFullYear(), now.getMonth());
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  const amount = minutes === 0 ? "0 год" : m === 0 ? `${h} год` : `${h} год ${m} хв`;
+  await ctx.reply(
+    `⏱ Відпрацьований час за ${MONTHS_UK[now.getMonth()]} ${now.getFullYear()}: ${amount}.` +
+      (hasOpenShift ? "\n\nУ цю суму входить поточна зміна, вона ще триває." : ""),
+  );
+}
+bot.command("worktime", showWorkTime);
+
+// ── Головне меню: постійна клавіатура під полем вводу. Показується лише
+// тим, чий Telegram прив'язано до акаунта; команди (/tasks, /news…) теж працюють.
+const MENU_WORKTIME = "⏱ Відпрацьований час";
+const MENU_TASKS = "📋 Мої задачі";
+const MENU_NEWS = "📢 Новини";
+const MENU_VACATION = "🏖 Відпустка";
+const mainMenu = new Keyboard().text(MENU_WORKTIME).text(MENU_TASKS).row().text(MENU_NEWS).text(MENU_VACATION).resized().persistent();
+
+bot.command("menu", async (ctx) => {
+  if (!ctx.from) return;
+  const person = await prisma.person.findUnique({ where: { telegramId: BigInt(ctx.from.id) } });
+  if (!person) {
+    await ctx.reply("Спершу прив'яжіть Telegram до вашого акаунта — напишіть /link.");
+    return;
+  }
+  await ctx.reply("Головне меню — кнопки внизу.", { reply_markup: mainMenu });
 });
+
+// Мають стояти ДО універсального обробника тексту нижче: він не передає керування далі.
+bot.hears(MENU_WORKTIME, showWorkTime);
+bot.hears(MENU_TASKS, showTasks);
+bot.hears(MENU_NEWS, showNews);
+bot.hears(MENU_VACATION, startVacation);
 
 // ── Самообслуговування паролем кабінету (правки 20.09.2026, п.1) — поруч
 // із ручним скидом адміністратором через веб (той самий lib/auth.ts::resetCabinetPassword).
@@ -419,8 +475,8 @@ bot.on("message:contact", async (ctx) => {
 
     try {
       await prisma.person.update({ where: { id: person.id }, data: { telegramId: BigInt(ctx.from.id) } });
-      await ctx.reply(`Готово, ${person.fullName}! Ваш Telegram прив'язано до акаунта в системі — сповіщення надходитимуть сюди.`, {
-        reply_markup: { remove_keyboard: true },
+      await ctx.reply(`Готово, ${person.fullName}! Ваш Telegram прив'язано до акаунта в системі — сповіщення надходитимуть сюди.\n\nКнопки меню — внизу екрана.`, {
+        reply_markup: mainMenu,
       });
     } catch (error) {
       console.error("Link error:", error);
@@ -718,6 +774,19 @@ setupQueue().catch((err) => console.error("Не вдалося підняти ч
 
 process.once("SIGINT", () => bot.stop());
 process.once("SIGTERM", () => bot.stop());
+
+// Список команд у кнопці «Меню» Telegram (зліва від поля вводу).
+bot.api
+  .setMyCommands([
+    { command: "menu", description: "Головне меню (кнопки)" },
+    { command: "worktime", description: "Відпрацьований час за місяць" },
+    { command: "tasks", description: "Мої задачі" },
+    { command: "news", description: "Новини" },
+    { command: "vacation", description: "Заявка на відпустку" },
+    { command: "password", description: "Скинути пароль кабінету" },
+    { command: "link", description: "Прив'язати Telegram до акаунта" },
+  ])
+  .catch((err) => console.error("Не вдалося оновити список команд:", err));
 
 bot.start();
 console.log("Бот запущено (long polling).");
