@@ -46,14 +46,19 @@ $dbUrl = ($envLine -replace '^\s*DATABASE_URL\s*=\s*', '').Trim().Trim('"').Trim
 $dbUrl = ($dbUrl -split '\?')[0]   # pg_dump не знає параметра ?schema=
 New-Item -ItemType Directory -Force -Path "backups" | Out-Null
 $backup = "backups\hrsystem-" + (Get-Date -Format "yyyyMMdd-HHmmss") + ".dump"
-pg_dump --format=custom --file=$backup $dbUrl
-if ($LASTEXITCODE -ne 0) { Fail "Не вдалося зробити бекап (pg_dump). Оновлення НЕ виконано, система не чіпалась." }
+# pg_dump може бути не в PATH: шукаємо його і в стандартній папці PostgreSQL
+$pgDump = (Get-Command pg_dump -ErrorAction SilentlyContinue).Source
+if (-not $pgDump) { $pgDump = Get-ChildItem "C:\Program Files\PostgreSQL\*\bin\pg_dump.exe" -ErrorAction SilentlyContinue | Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName }
+if (-not $pgDump) { Fail "Не знайдено pg_dump. Оновлення НЕ виконано, система не чіпалась." }
+& $pgDump --format=custom --file=$backup $dbUrl
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path $backup) -or (Get-Item $backup).Length -eq 0) { Fail "Не вдалося зробити бекап (pg_dump). Оновлення НЕ виконано, система не чіпалась." }
 Write-Host "Бекап: $backup" -ForegroundColor Green
 Get-ChildItem "backups\*.dump" | Sort-Object LastWriteTime -Descending | Select-Object -Skip 14 | Remove-Item -Force
 
 # ---- 3. Код, залежності, міграції, збірка ----
 $before = (git rev-parse HEAD).Trim()
-$restore = "Якщо система не працює після оновлення: pm2 stop all; відновіть базу: pg_restore --clean --if-exists --dbname=`"$dbUrl`" $backup ; поверніть код: git reset --hard $before ; npm ci ; npm run build ; pm2 restart all"
+$dbUrlMasked = $dbUrl -replace '(://[^:]+:)[^@]+@', '$1***@'   # пароль не друкуємо
+$restore = "Якщо система не працює після оновлення: pm2 stop all; відновіть базу: pg_restore --clean --if-exists --dbname=`"$dbUrlMasked`" $backup (пароль підставте з .env) ; поверніть код: git reset --hard $before ; npm ci ; npm run build ; pm2 restart all"
 try {
     Step "Завантаження коду"
     git pull --ff-only origin master
