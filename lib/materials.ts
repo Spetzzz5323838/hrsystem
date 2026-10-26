@@ -10,7 +10,7 @@ import { MaterialType } from "../generated/prisma/client";
 const STORAGE_ROOT = path.join(process.cwd(), "storage", "materials");
 
 const ALLOWED_MIME_TYPES: Record<string, { ext: string; maxSize: number }> = {
-  "application/pdf": { ext: ".pdf", maxSize: 15 * 1024 * 1024 },
+  "application/pdf": { ext: ".pdf", maxSize: 50 * 1024 * 1024 },
   "video/mp4": { ext: ".mp4", maxSize: 500 * 1024 * 1024 },
   "video/webm": { ext: ".webm", maxSize: 500 * 1024 * 1024 },
   "video/quicktime": { ext: ".mov", maxSize: 500 * 1024 * 1024 },
