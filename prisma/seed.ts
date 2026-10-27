@@ -560,7 +560,9 @@ async function seedTestUsers() {
       throw new Error("Для SEED_MODE=production задайте INITIAL_ADMIN_PHONE, INITIAL_ADMIN_NAME і INITIAL_ADMIN_PASSWORD у .env");
     }
     if (initialPassword.length < 10) throw new Error("INITIAL_ADMIN_PASSWORD має бути не коротшим за 10 символів");
-    users = [{ phone, fullName, positionTitle: "Системний адміністратор", orgNodeCode: "ONEC", role: Role.SYSADMIN }];
+    // Перший користувач — Власник у корені компанії: лише він має повний доступ,
+    // зокрема право генерувати QR для реєстрації нових працівників.
+    users = [{ phone, fullName, positionTitle: "Власник", orgNodeCode: "ROOT", role: Role.SYSADMIN }];
     password = initialPassword;
   }
 
