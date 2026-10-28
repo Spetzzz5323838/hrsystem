@@ -8,6 +8,12 @@
 # Continue, не Stop: у Windows PowerShell 5.1 будь-який текст у stderr від git/npm (навіть інформаційний) інакше обривав би скрипт.
 # Помилки команд перевіряються явно через $LASTEXITCODE.
 $ErrorActionPreference = "Continue"
+# UTF-8 у консолі: інакше кирилиця у виводі стає "╨д╨╛..." а введене "так" читається неправильно
+try { & chcp.com 65001 | Out-Null } catch {}
+$utf8 = New-Object System.Text.UTF8Encoding($false)
+[Console]::OutputEncoding = $utf8
+[Console]::InputEncoding = $utf8
+$OutputEncoding = $utf8
 Set-Location (Split-Path -Parent $PSScriptRoot)
 
 function Step($text) { Write-Host ""; Write-Host "==> $text" -ForegroundColor Cyan }
@@ -22,6 +28,7 @@ if (git status --porcelain --untracked-files=no) { Fail "На сервері є 
 # ---- 1. Що нового ----
 Step "Що нового на GitHub"
 git fetch origin master
+if ($LASTEXITCODE -ne 0) { Fail "Не вдалося завантажити дані з GitHub (немає зв'язку або немає прав на папку .git). Оновлення НЕ виконано, систему не чіпали." }
 $incoming = git log --oneline HEAD..origin/master
 if (-not $incoming) { Write-Host "Нових оновлень немає. Система вже актуальна." -ForegroundColor Green; exit 0 }
 $incoming | ForEach-Object { Write-Host "  $_" }
@@ -35,8 +42,8 @@ if ($newNotes) {
     @($newNotes) | Select-Object -First ([Math]::Max(0, @($newNotes).Count - $oldLen)) | ForEach-Object { Write-Host "  $_" }
 }
 Write-Host ""
-$answer = Read-Host "Оновити? Введіть 'так' для продовження"
-if ($answer -ne "так") { Write-Host "Скасовано."; exit 0 }
+$answer = Read-Host "Оновити? Введіть 'y' (або 'так') для продовження"
+if ($answer -notmatch '^\s*(y|yes|так|да)\s*$') { Write-Host "Скасовано."; exit 0 }
 
 # ---- 2. Бекап бази ----
 Step "Бекап бази даних"
