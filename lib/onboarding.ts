@@ -6,7 +6,7 @@ import { getCompetencyDelta } from "./competencies";
 import { isCuratorEligibleFor } from "./curator";
 import { hashPassword, generateCabinetPassword } from "./auth";
 import { checkProfileClosedBadge, checkBeyondProfileBadge, checkFastStartBadge, checkMentorBadge } from "./rating";
-import { queueMaterialFileDelivery } from "./notifications";
+import { getTrainingPlan, findActiveEmployment } from "./training";
 import { CREDENTIALS_STEP_TITLES, issueOnboardingCredentials } from "./credentials";
 import {
   Role,
@@ -16,7 +16,6 @@ import {
   ProcessType,
   EmploymentStatus,
   CompetencySource,
-  MaterialType,
 } from "../generated/prisma/client";
 
 function addMonths(date: Date, months: number): Date {
@@ -37,43 +36,7 @@ function addMonths(date: Date, months: number): Date {
  */
 const MATERIALS_ACK_TASK_TITLE = "Ознайомлення з обов'язковими матеріалами";
 
-/**
- * sendViaBot-матеріали посади (docs plan-v1.md §9.1) — спільна вибірка
- * для автосилки welcomebook (пункт 11, AUTO) і для повідомлення з кнопкою
- * підтвердження ознайомлення (пункт 13, MARK, нижче) — той самий перелік,
- * щоб стажер бачив однаковий список в обох місцях.
- */
-async function getSendableMaterials(positionProfileId: number) {
-  return prisma.material.findMany({
-    where: { sendViaBot: true, competency: { positionCompetencies: { some: { positionProfileId } } } },
-    orderBy: { id: "asc" },
-  });
-}
-
-type SendableMaterial = Awaited<ReturnType<typeof getSendableMaterials>>[number];
-
-/**
- * Рядок списку матеріалів у тексті повідомлення — правки 2026-09-25:
- * файлові матеріали (завантажені на сервер) більше не мають публічного
- * URL, для PDF файл шлеться окремим повідомленням одразу після (див.
- * queueSendableMaterialFiles), для відео — лише в кабінеті/інтранеті
- * (докс: "відео тільки через Wi-Fi інтранет", не через бот).
- */
-function formatMaterialLine(m: SendableMaterial): string {
-  if (m.url) return `• ${m.title} — ${m.url}`;
-  if (m.filePath && m.type === MaterialType.PDF) return `• ${m.title} (файл нижче)`;
-  if (m.filePath && m.type === MaterialType.VIDEO) return `• ${m.title} (відео — дивіться в кабінеті)`;
-  return `• ${m.title}`;
-}
-
-/** Ставить у чергу доставку файлів (тільки PDF — докс: відео лише інтранет) одразу після текстового списку. */
-async function queueSendableMaterialFiles(personId: number, materials: SendableMaterial[]): Promise<void> {
-  for (const m of materials) {
-    if (m.filePath && m.type === MaterialType.PDF) {
-      await queueMaterialFileDelivery(personId, m.id);
-    }
-  }
-}
+const OPEN_TRAINING_BUTTON = { inline_keyboard: [[{ text: "📚 Відкрити навчання", callback_data: "tr:menu" }]] };
 
 /**
  * Пункти з `responsibleRole: EMPLOYEE` (напр. "Згода на обробку
@@ -104,16 +67,17 @@ async function notifyEmployeeMarkTask(task: {
   const assignee = await prisma.employment.findUnique({ where: { id: task.assigneeId }, include: { person: true, staffUnit: true } });
   if (!assignee) return;
 
-  const replyMarkup = { inline_keyboard: [[{ text: "Ознайомлений(а)", callback_data: `employee_task_done:${task.id}` }]] };
-
   if (task.itemTemplate.title === MATERIALS_ACK_TASK_TITLE) {
-    const materials = await getSendableMaterials(assignee.staffUnit.positionProfileId);
-    if (materials.length) {
-      const lines = materials.map(formatMaterialLine);
-      await sendNotification(assignee.personId, "onboarding.materialsAcknowledgeRequest", { materialsList: lines.join("\n") }, replyMarkup);
-      await queueSendableMaterialFiles(assignee.personId, materials);
+    // Крок закривається САМ за прогресом у розділі «Навчання» (бот): без загальної кнопки.
+    const plan = await getTrainingPlan(assignee.personId);
+    const total = plan?.requiredTotal ?? 0;
+    const viewed = plan?.requiredViewed ?? 0;
+    if (total === 0 || viewed >= total) {
+      await completeTask(task.id, assignee.id);
       return;
     }
+    await sendNotification(assignee.personId, "training.reviewRequest", { viewed: String(viewed), total: String(total) }, OPEN_TRAINING_BUTTON);
+    return;
   }
 
   await sendNotification(
@@ -200,21 +164,15 @@ async function findAssigneeByRole(role: Role, targetOrgNodePath: string, exclude
  * ролі) -> задача одразу DONE.
  */
 /**
- * Пункт 11 базового шаблону ("Надсилання welcomebook і матеріалів LMS")
- * раніше був AUTO-заглушкою — позначався DONE без реальної відправки.
- * Тепер справді шле список sendViaBot-матеріалів позиції в Telegram
- * (docs plan-v1.md §9.1: PDF/welcomebook дублюються в боті). Файлів як
- * таких нема (Material.url/filePath у seed не заповнені) — шлемо назви
- * списком, посилання, якщо є. Мовчки виходить, якщо в людини ще нема
- * telegramId (окрема команда /link) або матеріалів немає.
+ * Пункт 11 базового шаблону ("Надсилання welcomebook і матеріалів LMS"):
+ * з 2026-10-28 не вантажить людину списком і файлами, а шле одне коротке
+ * повідомлення "план навчання готовий" з кнопкою в розділ «Навчання» бота —
+ * матеріали працівник отримує сам, по одному, коли йому зручно.
  */
-async function sendOnboardingMaterials(employment: { personId: number; staffUnit: { positionProfileId: number } }): Promise<void> {
-  const materials = await getSendableMaterials(employment.staffUnit.positionProfileId);
-  if (!materials.length) return;
-
-  const lines = materials.map(formatMaterialLine);
-  await sendNotification(employment.personId, "onboarding.welcomeMaterials", { materialsList: lines.join("\n") });
-  await queueSendableMaterialFiles(employment.personId, materials);
+async function sendOnboardingMaterials(employment: { personId: number }): Promise<void> {
+  const plan = await getTrainingPlan(employment.personId);
+  if (!plan || plan.requiredTotal === 0) return;
+  await sendNotification(employment.personId, "training.planReady", { count: String(plan.requiredTotal) }, OPEN_TRAINING_BUTTON);
 }
 
 export async function startOnboarding(employmentId: number): Promise<{ instanceId: number; alreadyExisted: boolean }> {
@@ -297,14 +255,13 @@ export async function startOnboarding(employmentId: number): Promise<{ instanceI
  * показує ті самі MARK-пункти, призначені особисто працівнику, без
  * очікування на нове сповіщення.
  */
-export async function getMyPendingEmployeeMarkTasks(personId: number): Promise<{ taskId: number; title: string; materialsList: string | null }[]> {
+export async function getMyPendingEmployeeMarkTasks(personId: number): Promise<{ taskId: number; title: string; trainingProgress: { viewed: number; total: number } | null }[]> {
   const employments = await prisma.employment.findMany({
     where: { personId, status: { not: EmploymentStatus.TERMINATED } },
-    select: { id: true, staffUnit: { select: { positionProfileId: true } } },
+    select: { id: true },
   });
   const employmentIds = employments.map((e) => e.id);
   if (!employmentIds.length) return [];
-  const positionByEmploymentId = new Map(employments.map((e) => [e.id, e.staffUnit.positionProfileId]));
 
   const tasks = await prisma.task.findMany({
     where: {
@@ -316,7 +273,7 @@ export async function getMyPendingEmployeeMarkTasks(personId: number): Promise<{
   });
 
   const viewsByInstance = new Map<number, TaskView[]>();
-  const result: { taskId: number; title: string; materialsList: string | null }[] = [];
+  const result: { taskId: number; title: string; trainingProgress: { viewed: number; total: number } | null }[] = [];
   for (const t of tasks) {
     let views = viewsByInstance.get(t.instanceId);
     if (!views) {
@@ -326,16 +283,13 @@ export async function getMyPendingEmployeeMarkTasks(personId: number): Promise<{
     const view = views.find((v) => v.taskId === t.id);
     if (!view || view.blocked) continue;
 
-    let materialsList: string | null = null;
-    if (t.itemTemplate.title === MATERIALS_ACK_TASK_TITLE && t.assigneeId) {
-      const positionProfileId = positionByEmploymentId.get(t.assigneeId);
-      if (positionProfileId != null) {
-        const materials = await getSendableMaterials(positionProfileId);
-        if (materials.length) materialsList = materials.map(formatMaterialLine).join("\n");
-      }
+    let trainingProgress: { viewed: number; total: number } | null = null;
+    if (t.itemTemplate.title === MATERIALS_ACK_TASK_TITLE) {
+      const plan = await getTrainingPlan(personId);
+      trainingProgress = { viewed: plan?.requiredViewed ?? 0, total: plan?.requiredTotal ?? 0 };
     }
 
-    result.push({ taskId: t.id, title: t.itemTemplate.title, materialsList });
+    result.push({ taskId: t.id, title: t.itemTemplate.title, trainingProgress });
   }
   return result;
 }
@@ -840,4 +794,31 @@ export async function updateProfileFields(
   }
 
   return { ok: true };
+}
+
+/**
+ * Після кожної відмітки "переглянув" у боті: якщо в людини відкритий крок
+ * "Ознайомлення з обов'язковими матеріалами" і всі обов'язкові матеріали переглянуто —
+ * закриває його автоматично й дякує. Повертає true, якщо крок закрито.
+ */
+export async function tryCompleteMaterialsAck(personId: number): Promise<boolean> {
+  const employment = await findActiveEmployment(personId);
+  if (!employment) return false;
+
+  const task = await prisma.task.findFirst({
+    where: {
+      assigneeId: employment.id,
+      status: TaskStatus.PENDING,
+      itemTemplate: { title: MATERIALS_ACK_TASK_TITLE, responsibleRole: Role.EMPLOYEE },
+    },
+  });
+  if (!task) return false;
+
+  const plan = await getTrainingPlan(personId);
+  if (!plan || plan.requiredViewed < plan.requiredTotal) return false;
+
+  const result = await completeTask(task.id, employment.id);
+  if (!result.ok) return false;
+  await sendNotification(personId, "training.completed", {});
+  return true;
 }

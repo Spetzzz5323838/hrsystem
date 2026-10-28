@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { prisma } from "./prisma";
-import { sendTelegramDocument } from "./telegram";
+import { sendTelegramDocument, sendTelegramMessage } from "./telegram";
 import { logAudit } from "./audit";
 import { MaterialType } from "../generated/prisma/client";
 
@@ -11,9 +11,10 @@ const STORAGE_ROOT = path.join(process.cwd(), "storage", "materials");
 
 const ALLOWED_MIME_TYPES: Record<string, { ext: string; maxSize: number }> = {
   "application/pdf": { ext: ".pdf", maxSize: 50 * 1024 * 1024 },
-  "video/mp4": { ext: ".mp4", maxSize: 500 * 1024 * 1024 },
-  "video/webm": { ext: ".webm", maxSize: 500 * 1024 * 1024 },
-  "video/quicktime": { ext: ".mov", maxSize: 500 * 1024 * 1024 },
+  // Відео теж надсилаються в Telegram за запитом працівника (кнопка «Отримати»), а Telegram приймає файли до 50 МБ.
+  "video/mp4": { ext: ".mp4", maxSize: 50 * 1024 * 1024 },
+  "video/webm": { ext: ".webm", maxSize: 50 * 1024 * 1024 },
+  "video/quicktime": { ext: ".mov", maxSize: 50 * 1024 * 1024 },
 };
 
 export type SaveMaterialFileInput = {
@@ -52,7 +53,7 @@ export async function saveMaterialFile(input: SaveMaterialFileInput): Promise<{ 
       title: input.title,
       type: input.type,
       durationMin: input.durationMin,
-      sendViaBot: input.type === MaterialType.VIDEO ? false : input.sendViaBot,
+      sendViaBot: input.sendViaBot,
       filePath,
       originalName: input.file.name,
       mimeType: input.file.type,
@@ -118,20 +119,26 @@ export async function deleteMaterialFile(filePath: string): Promise<void> {
 }
 
 /**
- * Воркер черги MATERIAL_FILE_DELIVERY_QUEUE (bot/index.ts) — файл
- * читається з диска заново, ніде не кешується. Мовчки виходить, якщо
- * матеріал/файл/telegramId людини вже не існують (той самий принцип, що
- * deliverPosPassword) — і якщо тип відео (докс: лише інтранет, не бот),
- * бо isRequired-перевірка sendViaBot=false для VIDEO вже стоїть на
- * збереженні, це остання лінія захисту про всяк випадок.
+ * Воркер черги MATERIAL_FILE_DELIVERY_QUEUE (bot/index.ts) — надсилає працівнику
+ * матеріал за його запитом у розділі «Навчання»: файл (PDF чи відео) документом,
+ * посилання — текстом. Файл читається з диска заново, ніде не кешується. Мовчки
+ * виходить, якщо матеріалу чи telegramId людини вже нема.
  */
 export async function deliverMaterialFile(personId: number, materialId: number): Promise<void> {
   const person = await prisma.person.findUnique({ where: { id: personId } });
   if (!person?.telegramId) return;
 
   const material = await prisma.material.findUnique({ where: { id: materialId } });
-  if (!material?.filePath || material.type !== MaterialType.PDF) return;
+  if (!material) return;
 
-  const buffer = await readMaterialFile(material.filePath);
-  await sendTelegramDocument(person.telegramId, buffer, material.originalName ?? `${material.title}.pdf`, material.title);
+  if (material.filePath) {
+    const buffer = await readMaterialFile(material.filePath);
+    const fallbackExt = material.type === MaterialType.VIDEO ? ".mp4" : ".pdf";
+    await sendTelegramDocument(person.telegramId, buffer, material.originalName ?? `${material.title}${fallbackExt}`, material.title);
+  } else if (material.url) {
+    await sendTelegramMessage(person.telegramId, `${material.title}
+${material.url}`);
+  } else {
+    await sendTelegramMessage(person.telegramId, `Матеріал «${material.title}» ще не додано — зверніться до адміністратора.`);
+  }
 }

@@ -81,7 +81,7 @@ type Profile = {
 };
 
 type DeltaRow = { competencyId: number; name: string; state: "valid" | "expired" | "missing"; validUntil: string | null };
-type MaterialRow = { id: number; title: string; type: string; url: string | null; hasFile: boolean; durationMin: number | null };
+type MaterialRow = { id: number; title: string; type: string; url: string | null; hasFile: boolean; durationMin: number | null; status?: "new" | "received" | "viewed" | "updated" };
 
 type TaskRow = {
   taskId: number;
@@ -251,6 +251,8 @@ export default function MePage() {
                     <span className="text-slate-800">{m.title}</span>
                   )}
                   <span className="flex items-center gap-2 text-xs text-slate-500">
+                    {m.status === "viewed" && <span className="text-emerald-700">✔ переглянуто</span>}
+                    {m.status === "updated" && <span className="text-amber-700">🔄 оновлено</span>}
                     {MATERIAL_TYPE_LABELS[m.type] ?? m.type}
                     {m.durationMin ? ` · ${m.durationMin} хв` : ""}
                   </span>

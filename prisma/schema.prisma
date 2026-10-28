@@ -318,6 +318,7 @@ model Person {
   trustedDevices    TrustedDevice[]
   notifications     Notification[]
   pollVotes         PollVote[]
+  materialProgress  MaterialProgress[]
 }
 
 /// Веб-сесія після входу. У базі — тільки хеш токена (SHA-256), сам
@@ -775,9 +776,9 @@ model CompetencyRecord {
 /// не потрібно. Відео — тільки через intranet, PDF можна й через бот
 /// (docs hr-system-plan-v1.md §9.1).
 model Material {
-  id                 Int          @id @default(autoincrement())
+  id                 Int                @id @default(autoincrement())
   competencyId       Int
-  competency         Competency   @relation(fields: [competencyId], references: [id])
+  competency         Competency         @relation(fields: [competencyId], references: [id])
   title              String
   type               MaterialType
   url                String?
@@ -787,14 +788,15 @@ model Material {
   originalName       String?
   mimeType           String?
   durationMin        Int?
-  sendViaBot         Boolean      @default(false)
+  sendViaBot         Boolean            @default(false)
   /// Легкий журнал версій (2026-09-27) — не зберігає самі старі файли
   /// (замінюються фізично, lib/materials.ts::replaceMaterialFile), лише
   /// коли й ким востаннє замінено вміст; null = від створення не замінювали.
   /// Повна історія замін — AuditLog(entityType="Material", action="material.contentReplaced").
   contentUpdatedAt   DateTime?
   contentUpdatedById Int?
-  contentUpdatedBy   Employment?  @relation("MaterialContentUpdatedBy", fields: [contentUpdatedById], references: [id])
+  contentUpdatedBy   Employment?        @relation("MaterialContentUpdatedBy", fields: [contentUpdatedById], references: [id])
+  progress           MaterialProgress[]
 
   @@index([competencyId])
 }
@@ -1550,4 +1552,22 @@ model Violation {
   ratingEventId       Int?
 
   @@index([orgNodeId, status])
+}
+
+/// Прогрес ознайомлення працівника з навчальним матеріалом (2026-10-28):
+/// "отримав" (запитав файл у боті) і "переглянув" (сам відмітив). Якщо матеріал
+/// оновили після viewedAt (Material.contentUpdatedAt), перегляд вважається застарілим.
+model MaterialProgress {
+  id          Int       @id @default(autoincrement())
+  personId    Int
+  person      Person    @relation(fields: [personId], references: [id])
+  materialId  Int
+  material    Material  @relation(fields: [materialId], references: [id], onDelete: Cascade)
+  requestedAt DateTime?
+  viewedAt    DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([personId, materialId])
+  @@index([materialId])
 }

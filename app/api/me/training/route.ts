@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "../../../../lib/prisma";
 import { getSessionPerson } from "../../../../lib/auth";
 import { getCompetencyDelta } from "../../../../lib/competencies";
+import { getTrainingPlan } from "../../../../lib/training";
 
 export async function GET() {
   const session = await getSessionPerson();
@@ -23,7 +24,12 @@ export async function GET() {
     select: { id: true, title: true, type: true, url: true, filePath: true, durationMin: true, competencyId: true },
   });
 
+  const plan = await getTrainingPlan(session.id);
+  const statusByMaterial = new Map((plan?.competencies ?? []).flatMap((c) => c.materials.map((m) => [m.id, m.status] as const)));
+
   return NextResponse.json({
+    requiredTotal: plan?.requiredTotal ?? 0,
+    requiredViewed: plan?.requiredViewed ?? 0,
     delta,
     materials: materials.map((m) => ({
       id: m.id,
@@ -33,6 +39,7 @@ export async function GET() {
       hasFile: !!m.filePath,
       durationMin: m.durationMin,
       competencyId: m.competencyId,
+      status: statusByMaterial.get(m.id) ?? "new",
     })),
   });
 }

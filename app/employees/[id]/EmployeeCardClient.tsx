@@ -1,6 +1,7 @@
 "use client";
 
 import ExtraObjectsBlock from "./ExtraObjectsBlock";
+import TrainingTab from "./TrainingTab";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { AlertTriangle, ArrowLeft, Award, Camera, Check, Clock, Eye, Lock, Phone, Star, ThumbsDown, ThumbsUp, X } from "lucide-react";
@@ -312,6 +313,9 @@ function Checklist({
                 {t.overdue && (
                   <span className="rounded bg-rose-50 px-1.5 py-0.5 text-xs text-rose-700 border border-rose-200">протерміновано</span>
                 )}
+                {t.title === "Ознайомлення з обов'язковими матеріалами" && !done && (
+                  <span className="text-xs text-slate-500">закривається автоматично, коли переглянуто всі обов&rsquo;язкові матеріали (вкладка «Навчання»)</span>
+                )}
                 {t.title === "Видача бейджа, спецодягу, ключів" && employmentId && (
                   <a
                     href={`/api/employees/${employmentId}/badge`}
@@ -388,6 +392,7 @@ const TABS = [
   ["transfer", "Переведення"],
   ["termination", "Звільнення"],
   ["comp", "Компетенції"],
+  ["training", "Навчання"],
   ["docs", "Документи"],
   ["rating", "Рейтинг"],
   ["review", "Квартальна оцінка"],
@@ -2583,6 +2588,8 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
             )}
           </div>
         )}
+
+        {tab === "training" && <TrainingTab employmentId={employmentId} />}
 
         {tab === "comp" && (
           <Section

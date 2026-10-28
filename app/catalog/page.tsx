@@ -1234,16 +1234,10 @@ export default function CatalogPage() {
                     type="number"
                     className="w-36 rounded border border-slate-300 px-2 py-1.5 text-sm"
                   />
-                  {matType !== "VIDEO" && (
-                    <label className="flex items-center gap-1.5 text-sm text-slate-700">
-                      <input type="checkbox" checked={matSendViaBot} onChange={(e) => setMatSendViaBot(e.target.checked)} />
-                      надсилати ботом
-                    </label>
-                  )}
                 </div>
-                {matType === "VIDEO" && (
-                  <p className="text-xs text-slate-400">Відео надсилається лише через кабінет/інтранет, не через бот.</p>
-                )}
+                <p className="text-xs text-slate-400">
+                  Працівник сам отримує матеріал у Telegram («Навчання» → «Отримати»): PDF і відео надсилаються файлом (до 50 МБ), посилання — повідомленням.
+                </p>
                 {matError && <p className="text-sm text-rose-700">{matError}</p>}
                 <button
                   onClick={submitMaterial}
@@ -1265,7 +1259,6 @@ export default function CatalogPage() {
                   <SortTh label="Матеріал" field="title" sort={matSort} onSort={(f) => setMatSort((s) => toggleSort(s, f))} />
                   <SortTh label="Тип" field="type" sort={matSort} onSort={(f) => setMatSort((s) => toggleSort(s, f))} />
                   <SortTh label="Компетенція" field="competencyName" sort={matSort} onSort={(f) => setMatSort((s) => toggleSort(s, f))} />
-                  <SortTh label="Канал" field="sendViaBot" sort={matSort} onSort={(f) => setMatSort((s) => toggleSort(s, f))} align="right" />
                   <SortTh label="Оновлено" field="contentUpdatedAt" sort={matSort} onSort={(f) => setMatSort((s) => toggleSort(s, f))} />
                   {canEdit && <th className="px-4 py-2" />}
                 </tr>
@@ -1291,15 +1284,6 @@ export default function CatalogPage() {
                     </td>
                     <td className="px-4 py-2 text-slate-600">{m.type === "PDF" ? "PDF" : m.type === "VIDEO" ? "Відео" : "Посилання"}</td>
                     <td className="px-4 py-2 text-slate-600">{m.competencyName}</td>
-                    <td className="px-4 py-2 text-right">
-                      <span
-                        className={`rounded px-1.5 py-0.5 text-xs ${
-                          m.sendViaBot ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"
-                        }`}
-                      >
-                        {m.sendViaBot ? "бот" : "intranet"}
-                      </span>
-                    </td>
                     <td className="px-4 py-2 text-slate-500">
                       {m.contentUpdatedAt ? (
                         <span title={m.contentUpdatedByName ? `Замінив(ла): ${m.contentUpdatedByName}` : undefined}>

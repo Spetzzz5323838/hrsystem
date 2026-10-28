@@ -1,6 +1,7 @@
 import { Bot, Keyboard, type Context } from "grammy";
 import { prisma } from "../lib/prisma";
-import { resolveAssignee, confirmReadyForAttestation, completeTask, getMyPendingEmployeeMarkTasks } from "../lib/onboarding";
+import { resolveAssignee, confirmReadyForAttestation, completeTask, getMyPendingEmployeeMarkTasks, tryCompleteMaterialsAck } from "../lib/onboarding";
+import { getTrainingPlan, getMaterialInPlan, markReceived, markViewed, type TrainingPlan, type MaterialStatus } from "../lib/training";
 import { registerTelegramMessageWorker } from "../lib/notifications";
 import { sendNotification, sendNotificationNow } from "../lib/notificationTemplates";
 import { getBoss } from "../lib/queue";
@@ -21,7 +22,7 @@ import { approveLoginChallenge, resetCabinetPassword } from "../lib/auth";
 import { checkVacationConflicts, createVacationRequest, type ConflictCheck } from "../lib/vacation";
 import { deliverBadgeCode } from "../lib/credentials";
 import { deliverMaterialFile } from "../lib/materials";
-import { BADGE_CODE_DELIVERY_QUEUE, MATERIAL_FILE_DELIVERY_QUEUE } from "../lib/notifications";
+import { BADGE_CODE_DELIVERY_QUEUE, MATERIAL_FILE_DELIVERY_QUEUE, queueMaterialFileDelivery } from "../lib/notifications";
 import { EmploymentStatus, Prisma, Role, VacationType } from "../generated/prisma/client";
 
 const token = process.env.TELEGRAM_BOT_TOKEN;
@@ -194,12 +195,16 @@ async function showTasks(ctx: Context) {
   }
 
   for (const t of tasks) {
-    const text = t.materialsList
-      ? `Матеріали для ознайомлення:\n\n${t.materialsList}\n\nПісля вивчення натисніть «Ознайомлений(а)».`
-      : `Потрібна ваша дія: «${t.title}».`;
-    const buttonText = t.materialsList ? "Ознайомлений(а)" : "Виконано";
-    await ctx.reply(text, {
-      reply_markup: { inline_keyboard: [[{ text: buttonText, callback_data: `employee_task_done:${t.taskId}` }]] },
+    if (t.trainingProgress) {
+      // Крок ознайомлення закривається сам за прогресом у «Навчанні» — кнопки «Виконано» немає.
+      await ctx.reply(
+        `Потрібна ваша дія: «${t.title}».\nПереглянуто ${t.trainingProgress.viewed} з ${t.trainingProgress.total}. Відкрийте «Навчання», отримуйте матеріали й відмічайте «Переглянув» — крок закриється автоматично.`,
+        { reply_markup: { inline_keyboard: [[{ text: "📚 Відкрити навчання", callback_data: "tr:menu" }]] } },
+      );
+      continue;
+    }
+    await ctx.reply(`Потрібна ваша дія: «${t.title}».`, {
+      reply_markup: { inline_keyboard: [[{ text: "Виконано", callback_data: `employee_task_done:${t.taskId}` }]] },
     });
   }
 }
@@ -277,7 +282,8 @@ const MENU_WORKTIME = "⏱ Відпрацьований час";
 const MENU_TASKS = "📋 Мої задачі";
 const MENU_NEWS = "📢 Новини";
 const MENU_VACATION = "🏖 Відпустка";
-const mainMenu = new Keyboard().text(MENU_WORKTIME).text(MENU_TASKS).row().text(MENU_NEWS).text(MENU_VACATION).resized().persistent();
+const MENU_TRAINING = "📚 Навчання";
+const mainMenu = new Keyboard().text(MENU_WORKTIME).text(MENU_TASKS).row().text(MENU_TRAINING).text(MENU_NEWS).row().text(MENU_VACATION).resized().persistent();
 
 bot.command("menu", async (ctx) => {
   if (!ctx.from) return;
@@ -294,6 +300,136 @@ bot.hears(MENU_WORKTIME, showWorkTime);
 bot.hears(MENU_TASKS, showTasks);
 bot.hears(MENU_NEWS, showNews);
 bot.hears(MENU_VACATION, startVacation);
+
+// ── Навчання (2026-10-28): працівник бачить свій план, сам запитує матеріали й
+// відмічає, що переглянув; крок онбордингу "Ознайомлення..." закривається автоматично.
+const STATUS_ICON: Record<MaterialStatus, string> = { new: "⬜", received: "📥", viewed: "✅", updated: "🔄" };
+const TYPE_LABEL: Record<string, string> = { PDF: "PDF", VIDEO: "відео", LINK: "посилання" };
+type InlineKeyboard = { inline_keyboard: { text: string; callback_data: string }[][] };
+
+function trainingMenuView(plan: TrainingPlan): { text: string; markup: InlineKeyboard } {
+  if (!plan.competencies.length) {
+    return { text: "Для вашої посади навчальних матеріалів поки немає.", markup: { inline_keyboard: [] } };
+  }
+  const lines = [`📚 План навчання: ${plan.positionTitle}`, ""];
+  if (plan.requiredTotal > 0) lines.push(`Обов'язкові матеріали: переглянуто ${plan.requiredViewed} з ${plan.requiredTotal}`, "");
+  for (const c of plan.competencies) {
+    const tag = c.state === "valid" ? "складено ✅" : c.mandatory ? "обов'язково" : "рекомендовано";
+    lines.push(`${c.name} — ${c.viewedCount}/${c.materials.length} (${tag})`);
+  }
+  return {
+    text: lines.join("\n"),
+    markup: { inline_keyboard: plan.competencies.map((c) => [{ text: `${c.name} (${c.viewedCount}/${c.materials.length})`, callback_data: `tr:c:${c.competencyId}` }]) },
+  };
+}
+
+function trainingCompetencyView(plan: TrainingPlan, competencyId: number): { text: string; markup: InlineKeyboard } | null {
+  const c = plan.competencies.find((x) => x.competencyId === competencyId);
+  if (!c) return null;
+  const lines = [`📖 ${c.name}`, "", "⬜ не отримано · 📥 отримано · ✅ переглянуто · 🔄 оновлено, перегляньте знову", ""];
+  const rows: { text: string; callback_data: string }[][] = [];
+  c.materials.forEach((m, i) => {
+    const meta = `${TYPE_LABEL[m.type] ?? m.type}${m.durationMin ? `, ${m.durationMin} хв` : ""}`;
+    lines.push(`${i + 1}. ${STATUS_ICON[m.status]} ${m.title} (${meta})${m.deliverable ? "" : " — ще не додано"}`);
+    if (!m.deliverable) return;
+    const row = [{ text: `📥 Отримати ${i + 1}`, callback_data: `tr:g:${m.id}` }];
+    if (m.status === "received" || m.status === "updated") row.push({ text: `✅ Переглянув ${i + 1}`, callback_data: `tr:v:${m.id}` });
+    rows.push(row);
+  });
+  rows.push([{ text: "⬅ До плану", callback_data: "tr:menu" }]);
+  return { text: lines.join("\n"), markup: { inline_keyboard: rows } };
+}
+
+async function trainingPerson(ctx: Context) {
+  if (!ctx.from) return null;
+  const person = await prisma.person.findUnique({ where: { telegramId: BigInt(ctx.from.id) } });
+  if (!person) {
+    await ctx.reply("Спершу прив'яжіть Telegram до вашого акаунта — напишіть /link.");
+    return null;
+  }
+  return person;
+}
+
+/** Показує екран: редагує повідомлення з кнопкою, а якщо не вийшло (старе/те саме) — шле нове. */
+async function showTrainingScreen(ctx: Context, view: { text: string; markup: InlineKeyboard }, edit: boolean) {
+  if (edit) {
+    try {
+      await ctx.editMessageText(view.text, { reply_markup: view.markup });
+      return;
+    } catch {
+      // "message is not modified" або повідомлення вже недоступне — нижче надішлемо нове
+      if (ctx.callbackQuery) return;
+    }
+  }
+  await ctx.reply(view.text, { reply_markup: view.markup });
+}
+
+async function showTraining(ctx: Context) {
+  const person = await trainingPerson(ctx);
+  if (!person) return;
+  const plan = await getTrainingPlan(person.id);
+  if (!plan) {
+    await ctx.reply("Не знайдено вашого працевлаштування.");
+    return;
+  }
+  await showTrainingScreen(ctx, trainingMenuView(plan), false);
+}
+bot.command("training", showTraining);
+bot.hears(MENU_TRAINING, showTraining);
+
+bot.callbackQuery(/^tr:menu$/, async (ctx) => {
+  const person = await trainingPerson(ctx);
+  if (!person) return;
+  await ctx.answerCallbackQuery();
+  const plan = await getTrainingPlan(person.id);
+  if (plan) await showTrainingScreen(ctx, trainingMenuView(plan), true);
+});
+
+bot.callbackQuery(/^tr:c:(\d+)$/, async (ctx) => {
+  const person = await trainingPerson(ctx);
+  if (!person) return;
+  await ctx.answerCallbackQuery();
+  const plan = await getTrainingPlan(person.id);
+  const view = plan && trainingCompetencyView(plan, Number(ctx.match[1]));
+  if (view) await showTrainingScreen(ctx, view, true);
+});
+
+bot.callbackQuery(/^tr:g:(\d+)$/, async (ctx) => {
+  const person = await trainingPerson(ctx);
+  if (!person) return;
+  const found = await getMaterialInPlan(person.id, Number(ctx.match[1]));
+  if (!found) {
+    await ctx.answerCallbackQuery({ text: "Цього матеріалу немає у вашому плані", show_alert: true });
+    return;
+  }
+  if (!found.material.deliverable) {
+    await ctx.answerCallbackQuery({ text: "Матеріал ще не додано — зверніться до адміністратора", show_alert: true });
+    return;
+  }
+  await markReceived(person.id, found.material.id);
+  await queueMaterialFileDelivery(person.id, found.material.id);
+  await ctx.answerCallbackQuery({ text: "Надсилаю матеріал…" });
+  const plan = await getTrainingPlan(person.id);
+  const view = plan && trainingCompetencyView(plan, found.competency.competencyId);
+  if (view) await showTrainingScreen(ctx, view, true);
+});
+
+bot.callbackQuery(/^tr:v:(\d+)$/, async (ctx) => {
+  const person = await trainingPerson(ctx);
+  if (!person) return;
+  const materialId = Number(ctx.match[1]);
+  const result = await markViewed(person.id, materialId);
+  if (!result.ok) {
+    await ctx.answerCallbackQuery({ text: result.error, show_alert: true });
+    return;
+  }
+  await ctx.answerCallbackQuery({ text: "Відмічено ✅" });
+  await tryCompleteMaterialsAck(person.id);
+  const found = await getMaterialInPlan(person.id, materialId);
+  const plan = await getTrainingPlan(person.id);
+  const view = plan && found && trainingCompetencyView(plan, found.competency.competencyId);
+  if (view) await showTrainingScreen(ctx, view, true);
+});
 
 // ── Самообслуговування паролем кабінету (правки 20.09.2026, п.1) — поруч
 // із ручним скидом адміністратором через веб (той самий lib/auth.ts::resetCabinetPassword).
