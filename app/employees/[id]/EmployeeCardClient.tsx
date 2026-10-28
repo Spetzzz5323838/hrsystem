@@ -1,5 +1,6 @@
 "use client";
 
+import ExtraObjectsBlock from "./ExtraObjectsBlock";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { AlertTriangle, ArrowLeft, Award, Camera, Check, Clock, Eye, Lock, Phone, Star, ThumbsDown, ThumbsUp, X } from "lucide-react";
@@ -2371,6 +2372,7 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
                 )}
               </div>
             )}
+            {detail && <ExtraObjectsBlock employmentId={employmentId} />}
             {profileFieldsOpen && detail && (
               <ProfileFieldsDialog
                 staffUnits={staffUnits}
