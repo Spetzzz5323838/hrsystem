@@ -1,7 +1,7 @@
 import { Bot, Keyboard, type Context } from "grammy";
 import { prisma } from "../lib/prisma";
 import { resolveAssignee, confirmReadyForAttestation, completeTask, getMyPendingEmployeeMarkTasks, tryCompleteMaterialsAck } from "../lib/onboarding";
-import { getTrainingPlan, getMaterialInPlan, markReceived, markViewed, type TrainingPlan, type MaterialStatus } from "../lib/training";
+import { getTrainingPlan, getMaterialInPlan, markReceived, markViewed, notifyTrainingChanges, type TrainingPlan, type MaterialStatus } from "../lib/training";
 import { registerTelegramMessageWorker } from "../lib/notifications";
 import { sendNotification, sendNotificationNow } from "../lib/notificationTemplates";
 import { getBoss } from "../lib/queue";
@@ -822,6 +822,7 @@ const DOCUMENT_RETENTION_QUEUE = "document-retention-cleanup";
 const REMINDER_DUE_QUEUE = "reminder-due-check";
 const POLL_CLOSE_QUEUE = "poll-close-check";
 const INSPECTION_TICK_QUEUE = "inspection-schedule-tick";
+const TRAINING_CHANGES_QUEUE = "training-changes-notify";
 const AREA_STAFFING_QUEUE = "area-staffing-check";
 const TERMINAL_SILENCE_QUEUE = "terminal-silence-check";
 const SHIFT_AUTOCLOSE_QUEUE = "shift-autoclose-check";
@@ -884,6 +885,13 @@ async function setupQueue() {
     if (alerted > 0) console.log(`Термінали, що мовчать: ${alerted}.`);
   });
   await boss.schedule(TERMINAL_SILENCE_QUEUE, "20 * * * *");
+
+  await boss.createQueue(TRAINING_CHANGES_QUEUE);
+  await boss.work(TRAINING_CHANGES_QUEUE, async () => {
+    const { changes, messages } = await notifyTrainingChanges();
+    if (changes) console.log(`Зміни в навчанні: ${changes}, повідомлень: ${messages}.`);
+  });
+  await boss.schedule(TRAINING_CHANGES_QUEUE, "*/5 * * * *");
 
   await boss.createQueue(AREA_STAFFING_QUEUE);
   await boss.work(AREA_STAFFING_QUEUE, async () => {

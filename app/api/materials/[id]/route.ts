@@ -1,3 +1,4 @@
+import { recordTrainingChange } from "../../../../lib/training";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "../../../../lib/prisma";
 import { getSessionPerson } from "../../../../lib/auth";
@@ -49,17 +50,24 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     type = body.type;
   }
 
+  const newUrl = body?.url !== undefined ? (typeof body.url === "string" && body.url.trim() ? body.url.trim() : null) : undefined;
+  const before = await prisma.material.findUnique({ where: { id: materialId }, select: { url: true } });
+  // Нове посилання = оновлений вміст: працівникам іде сповіщення, раніше відмічений перегляд скидається.
+  const urlChanged = newUrl !== undefined && newUrl !== null && newUrl !== before?.url;
+
   const material = await prisma.material.update({
     where: { id: materialId },
     data: {
       title,
       type,
-      url: body?.url !== undefined ? (typeof body.url === "string" && body.url.trim() ? body.url.trim() : null) : undefined,
+      url: newUrl,
+      ...(urlChanged ? { contentUpdatedAt: new Date() } : {}),
       durationMin: body?.durationMin !== undefined ? (body.durationMin != null ? Number(body.durationMin) : null) : undefined,
       sendViaBot: body?.sendViaBot !== undefined ? Boolean(body.sendViaBot) : undefined,
     },
   });
 
+  if (urlChanged) await recordTrainingChange({ kind: "MATERIAL_UPDATED", materialId });
   return NextResponse.json({ id: material.id });
 }
 

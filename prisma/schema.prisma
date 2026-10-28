@@ -1571,3 +1571,19 @@ model MaterialProgress {
   @@unique([personId, materialId])
   @@index([materialId])
 }
+
+/// Зміна в навчальному плані, про яку треба повідомити працівників (2026-10-28):
+/// додано/оновлено матеріал або додано компетенцію до профілю посади. Бот раз на кілька
+/// хвилин збирає непророзіслані зміни й шле кожному ОДНЕ зведене повідомлення.
+model TrainingChange {
+  id                Int       @id @default(autoincrement())
+  /// MATERIAL_ADDED | MATERIAL_UPDATED | COMPETENCY_ADDED
+  kind              String
+  materialId        Int?
+  competencyId      Int?
+  positionProfileId Int?
+  createdAt         DateTime  @default(now())
+  notifiedAt        DateTime?
+
+  @@index([notifiedAt])
+}

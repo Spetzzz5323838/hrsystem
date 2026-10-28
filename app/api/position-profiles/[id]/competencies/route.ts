@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "../../../../../lib/prisma";
 import { getSessionPerson } from "../../../../../lib/auth";
 import { canManageCatalog } from "../../../../../lib/permissions";
+import { recordTrainingChange } from "../../../../../lib/training";
 import { Prisma } from "../../../../../generated/prisma/client";
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -21,6 +22,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   try {
     await prisma.positionCompetency.create({ data: { positionProfileId, competencyId } });
+    await recordTrainingChange({ kind: "COMPETENCY_ADDED", competencyId, positionProfileId });
     return NextResponse.json({ ok: true });
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {

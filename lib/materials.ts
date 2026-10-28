@@ -3,6 +3,7 @@ import path from "node:path";
 import { prisma } from "./prisma";
 import { sendTelegramDocument, sendTelegramMessage } from "./telegram";
 import { logAudit } from "./audit";
+import { recordTrainingChange } from "./training";
 import { MaterialType } from "../generated/prisma/client";
 
 // Файли матеріалів — поза `public/`, як і скани документів (не роздаються
@@ -60,6 +61,7 @@ export async function saveMaterialFile(input: SaveMaterialFileInput): Promise<{ 
     },
   });
 
+  await recordTrainingChange({ kind: "MATERIAL_ADDED", materialId: material.id });
   return { ok: true, id: material.id };
 }
 
@@ -106,6 +108,7 @@ export async function replaceMaterialFile(materialId: number, file: File, actorI
     entityId: materialId,
     diff: { oldOriginalName: existing.originalName, newOriginalName: file.name },
   });
+  await recordTrainingChange({ kind: "MATERIAL_UPDATED", materialId });
 
   return { ok: true };
 }

@@ -1,3 +1,4 @@
+import { recordTrainingChange } from "../../../lib/training";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "../../../lib/prisma";
 import { getSessionPerson } from "../../../lib/auth";
@@ -99,5 +100,6 @@ export async function POST(request: NextRequest) {
     },
   });
 
+  if (material.url) await recordTrainingChange({ kind: "MATERIAL_ADDED", materialId: material.id });
   return NextResponse.json({ id: material.id });
 }
