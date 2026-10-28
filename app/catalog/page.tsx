@@ -1,17 +1,62 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { HelpCircle } from "lucide-react";
 import AppShell from "../components/AppShell";
 
-/** Коротка текстова підказка (правки 20.09.2026, п.2) — нативний title, ховер мишею. */
+/**
+ * Підказка "?" — відкривається по КЛІКУ/дотику (а не нативним title при наведенні:
+ * у Safari та на планшетах/телефонах title не показується). Закривається клацанням поза нею.
+ */
 function Hint({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLSpanElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: Event) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("touchstart", close);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("touchstart", close);
+    };
+  }, [open]);
+
   return (
-    <span title={text} className="inline-flex cursor-help align-text-top text-slate-400 hover:text-slate-600">
-      <HelpCircle size={13} />
+    <span ref={ref} className="relative inline-flex align-text-top">
+      <button type="button" onClick={() => setOpen((o) => !o)} aria-label="Пояснення" aria-expanded={open} className="text-slate-400 hover:text-slate-600">
+        <HelpCircle size={13} />
+      </button>
+      {open && (
+        <span role="tooltip" className="absolute left-0 top-5 z-30 w-64 rounded-md border border-slate-300 bg-white p-2.5 text-left text-xs font-normal leading-snug text-slate-700 shadow-lg">
+          {text}
+        </span>
+      )}
     </span>
   );
 }
+
+/** Функціональні ролі посад: зрозумілі назви й пояснення замість внутрішніх кодів. */
+const SYSTEM_ROLES: { value: string; label: string; description: string }[] = [
+  { value: "STORE_ADMIN", label: "Адміністратор магазину / цеху", description: "Отримує в онбордингу, переведенні й звільненні кроки «адміністратора об'єкта»: заповнення профілю, куратор, інструктажі, атестація." },
+  { value: "ACCOUNTANT", label: "Бухгалтер", description: "Отримує бухгалтерські кроки (прийом і скани документів, матвідповідальність, розрахунок при звільненні). Має доступ до сканів документів." },
+  { value: "ONEC_ADMIN", label: "Оператор 1С", description: "Отримує кроки, пов'язані з обліком у 1С." },
+  { value: "AUDITOR", label: "Ревізор", description: "Перевіряє й приймає обладнання та майно при звільненні." },
+  { value: "COO", label: "Керівництво (COO, фінансовий директор)", description: "Вищі погодження (складні відпустки, переведення), резервний виконавець кроків, повідомлення про пропущені обходи." },
+  { value: "SYSADMIN", label: "Системний адміністратор", description: "Налаштування системи: шаблони, довідники, права; резервний виконавець кроків. Доступу до сканів документів не має." },
+];
+
+/** Додаткові модулі онбордингу, що вмикаються вручну (решта вмикаються галочками «Каса / Матвідповідальність / Харчова група» й рівнем посади). */
+const EXTRA_MODULES: [string, string, string][] = [
+  ["RETAIL", "Роздріб", "стандарти обслуговування, ваговий товар, викладка, терміни придатності, тест «Стандарти»"],
+  ["WAREHOUSE", "Склад", "приймання товару, складська техніка, схема зон зберігання"],
+  ["TRANSPORT", "Транспорт", "посвідчення й медсправка, інструктаж з БДР, оформлення ТТН, закріплення автомобіля"],
+  ["SECURITY", "Охорона", "довідка про несудимість, реагування на інциденти, порядок затримання"],
+  ["OFFICE", "Офіс", "доступ до системи, робоче місце й техніка, регламенти відділу"],
+];
 
 type SortState<T extends string> = { field: T; dir: "asc" | "desc" };
 
@@ -732,7 +777,7 @@ export default function CatalogPage() {
                       </div>
                       <div>
                         <p className="flex items-center gap-1 text-slate-500">
-                          Каса
+                          Працює з касою
                           <Hint text="Посада працює з касовим апаратом — додає в онбординг реєстрацію на касі й тест «Каса»." />
                         </p>
                         {canEdit ? (
@@ -745,10 +790,11 @@ export default function CatalogPage() {
                         ) : (
                           <p className="text-slate-900">{detail.requiresCashierAccount ? "так" : "ні"}</p>
                         )}
+                        <p className="mt-0.5 text-xs text-slate-400">Додає в онбординг реєстрацію на касі й тест «Каса».</p>
                       </div>
                       <div>
                         <p className="flex items-center gap-1 text-slate-500">
-                          Матвідповідальність
+                          Матеріально відповідальна
                           <Hint text="Посада матеріально відповідальна (МВО) — додає договір про матвідповідальність в онбординг і пункт передачі ТМЦ при звільненні/переведенні." />
                         </p>
                         {canEdit ? (
@@ -761,10 +807,11 @@ export default function CatalogPage() {
                         ) : (
                           <p className="text-slate-900">{detail.isMateriallyLiable ? "так" : "ні"}</p>
                         )}
+                        <p className="mt-0.5 text-xs text-slate-400">Додає договір про матвідповідальність і передачу товарно-матеріальних цінностей.</p>
                       </div>
                       <div>
                         <p className="flex items-center gap-1 text-slate-500">
-                          Харчова група
+                          Працює з харчовими продуктами
                           <Hint text="Посада працює з харчовими продуктами — додає в онбординг медкнижку, інструктаж із санітарії/HACCP і тест «Санітарія»." />
                         </p>
                         {canEdit ? (
@@ -777,6 +824,7 @@ export default function CatalogPage() {
                         ) : (
                           <p className="text-slate-900">{detail.isFoodHandling ? "так" : "ні"}</p>
                         )}
+                        <p className="mt-0.5 text-xs text-slate-400">Додає медкнижку, правила гігієни, санітарний одяг і тест «Санітарія».</p>
                       </div>
                       <div>
                         <p className="flex items-center gap-1 text-slate-500">
@@ -793,6 +841,7 @@ export default function CatalogPage() {
                         ) : (
                           <p className="text-slate-900">{detail.canBeCurator ? "так" : "ні"}</p>
                         )}
+                        <p className="mt-0.5 text-xs text-slate-400">Може навчати стажерів (без цього людину не можна призначити куратором).</p>
                       </div>
                       <div>
                         <p className="flex items-center gap-1 text-slate-500">
@@ -805,41 +854,41 @@ export default function CatalogPage() {
                             onChange={(e) => updatePosition({ systemRole: e.target.value || null })}
                             className="mt-0.5 rounded border border-slate-300 px-1.5 py-0.5 text-sm"
                           >
-                            <option value="">—</option>
-                            {["ONEC_ADMIN", "ACCOUNTANT", "AUDITOR", "COO", "SYSADMIN"].map((r) => (
-                              <option key={r} value={r}>
-                                {r}
+                            <option value="">— без функціональної ролі</option>
+                            {SYSTEM_ROLES.map((r) => (
+                              <option key={r.value} value={r.value}>
+                                {r.label}
                               </option>
                             ))}
                           </select>
                         ) : (
-                          <p className="text-slate-900">{detail.systemRole ?? "—"}</p>
+                          <p className="text-slate-900">{SYSTEM_ROLES.find((r) => r.value === detail.systemRole)?.label ?? "—"}</p>
                         )}
+                        <p className="mt-0.5 text-xs text-slate-400">
+                          {SYSTEM_ROLES.find((r) => r.value === detail.systemRole)?.description ?? "Звичайна посада без особливих повноважень у процесах."}
+                        </p>
                       </div>
                     </div>
 
                     <div className="border-t border-slate-100 px-4 py-3">
                       <p className="flex items-center gap-1 text-sm text-slate-500">
-                        Додаткові модулі онбордингу
-                        <Hint text="Ці п'ять модулів (роздріб/склад/транспорт/охорона/офіс) не мають окремого прапорця вище — вмикайте вручну, якщо посаді потрібне відповідне навчання." />
+                        Додаткові набори кроків онбордингу
+                        <Hint text="Модуль — це набір додаткових кроків чек-ліста онбордингу. Модулі «Каса», «Матвідповідальність» і «Харчова група» вмикаються галочками вище, «Управління» — рівнем посади від 30. Ці п'ять вмикайте вручну, якщо посаді потрібне відповідне навчання." />
                       </p>
                       <div className="mt-1.5 flex flex-wrap gap-3 text-sm">
-                        {[
-                          ["RETAIL", "Роздріб"],
-                          ["WAREHOUSE", "Склад"],
-                          ["TRANSPORT", "Транспорт"],
-                          ["SECURITY", "Охорона"],
-                          ["OFFICE", "Офіс"],
-                        ].map(([code, label]) => (
-                          <label key={code} className="flex items-center gap-1.5 text-slate-700">
+                        {EXTRA_MODULES.map(([code, label, description]) => (
+                          <label key={code} className="flex items-start gap-1.5 text-slate-700">
                             <input
                               type="checkbox"
                               disabled={!canEdit}
                               checked={detail.moduleFlags?.includes(code) ?? false}
                               onChange={(e) => toggleExtraModule(code, e.target.checked)}
-                              className="h-4 w-4"
+                              className="mt-0.5 h-4 w-4"
                             />
-                            {label}
+                            <span>
+                              {label}
+                              <span className="block max-w-[14rem] text-xs text-slate-400">{description}</span>
+                            </span>
                           </label>
                         ))}
                       </div>
