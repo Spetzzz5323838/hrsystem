@@ -762,7 +762,9 @@ export default function StructurePage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {staffing.roster.map((r) => (
+                      {staffing.roster
+                        .filter((r) => r.planned > 0 || r.actual > 0)
+                        .map((r) => (
                         <tr key={r.positionProfileId}>
                           <td className="px-4 py-2 text-slate-800">{r.title}</td>
                           <td className="px-4 py-2 text-right tabular-nums text-slate-600">{r.planned}</td>
@@ -801,16 +803,19 @@ export default function StructurePage() {
                       </thead>
                       <tbody className="divide-y divide-slate-100">
                         {(directStaffUnits ?? []).map((su) => (
-                          <tr key={su.id}>
-                            <td className="px-4 py-2 text-slate-800">{su.positionTitle}</td>
+                          <tr key={su.id} className={su.plannedHeadcount === 0 ? "bg-slate-50" : ""}>
+                            <td className="px-4 py-2 text-slate-800">
+                              {su.positionTitle}
+                              {su.plannedHeadcount === 0 && <span className="ml-2 rounded border border-slate-300 bg-white px-1.5 py-0.5 text-xs text-slate-500">позицію закрито</span>}
+                            </td>
                             <td className="px-4 py-2 text-right">
                               <input
                                 key={su.id + "-" + su.plannedHeadcount}
                                 type="number"
-                                min={1}
+                                min={0}
                                 defaultValue={su.plannedHeadcount}
                                 disabled={suBusyId === su.id}
-                                onBlur={(e) => Number(e.target.value) !== su.plannedHeadcount && Number(e.target.value) >= 1 && updateStaffUnitPlan(su.id, Number(e.target.value))}
+                                onBlur={(e) => Number(e.target.value) !== su.plannedHeadcount && Number(e.target.value) >= 0 && updateStaffUnitPlan(su.id, Number(e.target.value))}
                                 className="w-16 rounded border border-slate-300 px-1.5 py-0.5 text-right tabular-nums"
                               />
                             </td>
@@ -818,6 +823,7 @@ export default function StructurePage() {
                             <td className="px-4 py-2 text-right">
                               <div className="flex items-center justify-end gap-2">
                                 {canManageVacancies &&
+                                  su.plannedHeadcount > 0 &&
                                   (vacancyCreatedForId === su.id ? (
                                     <span className="text-xs text-emerald-700">вакансію створено</span>
                                   ) : (
@@ -830,6 +836,25 @@ export default function StructurePage() {
                                       + вакансія
                                     </button>
                                   ))}
+                                {su.plannedHeadcount > 0 && su.actualCount === 0 && (
+                                  <button
+                                    disabled={suBusyId === su.id}
+                                    onClick={() => confirm(`Закрити позицію «${su.positionTitle}»? План стане 0, посада перестане рахуватися вакансією; історія працівників збережеться.`) && updateStaffUnitPlan(su.id, 0)}
+                                    title="Посада тут більше не потрібна: план 0, історія зберігається"
+                                    className="text-xs text-slate-600 hover:text-slate-900 disabled:opacity-40"
+                                  >
+                                    закрити позицію
+                                  </button>
+                                )}
+                                {su.plannedHeadcount === 0 && (
+                                  <button
+                                    disabled={suBusyId === su.id}
+                                    onClick={() => updateStaffUnitPlan(su.id, 1)}
+                                    className="text-xs text-emerald-700 hover:text-emerald-900 disabled:opacity-40"
+                                  >
+                                    відновити
+                                  </button>
+                                )}
                                 <button
                                   disabled={suBusyId === su.id}
                                   onClick={() => deleteStaffUnit(su.id)}

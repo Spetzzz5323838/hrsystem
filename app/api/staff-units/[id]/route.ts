@@ -18,7 +18,8 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
   const body = await request.json().catch(() => null);
   const plannedHeadcount = Number(body?.plannedHeadcount);
-  if (!Number.isInteger(plannedHeadcount) || plannedHeadcount < 1) return NextResponse.json({ error: "План має бути щонайменше 1" }, { status: 400 });
+  // 0 = "позицію закрито": посада на цьому вузлі більше не потрібна, але історія людей лишається.
+  if (!Number.isInteger(plannedHeadcount) || plannedHeadcount < 0) return NextResponse.json({ error: "План не може бути від'ємним" }, { status: 400 });
 
   const staffUnit = await prisma.staffUnit.findUnique({
     where: { id: staffUnitId },
@@ -67,12 +68,13 @@ export async function DELETE(_request: NextRequest, { params }: { params: Promis
 
   if (staffUnit._count.employments > 0) {
     return NextResponse.json(
-      { error: "Не можна видалити — на цій штатній одиниці є (або були) працівники. Задачі найму/звільнення не можуть лишитись без штатної одиниці." },
+      { error: "Не можна видалити — на цій позиції є (або були) працівники, їхня історія має лишитись. Якщо посада тут більше не потрібна, натисніть «закрити позицію» (план 0)." },
       { status: 409 },
     );
   }
 
-  await prisma.staffUnit.delete({ where: { id: staffUnitId } });
+  // Відкриті вакансії цієї позиції (вони створюються разом із планом) видаляються разом із нею.
+  await prisma.$transaction([prisma.vacancy.deleteMany({ where: { staffUnitId } }), prisma.staffUnit.delete({ where: { id: staffUnitId } })]);
 
   const actor = await prisma.employment.findFirst({ where: { personId: session.id, status: { not: EmploymentStatus.TERMINATED } } });
   await logAudit({ actorId: actor?.id ?? null, action: "staffUnit.deleted", entityType: "StaffUnit", entityId: staffUnitId });

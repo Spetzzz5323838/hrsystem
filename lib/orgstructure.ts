@@ -220,7 +220,7 @@ export async function createOrgNodeFromTemplate(
 /**
  * Видалення вузла дерева. Дозволене лише для "порожнього" вузла: без дочірніх
  * вузлів, без людей (навіть звільнених), вакансій, терміналів, ділянок, змін,
- * обходів та іншої історії. Порожні штатні одиниці й розклад обходів видаляються
+ * обходів та іншої історії. Порожні штатні одиниці, їх вакансії й розклад обходів видаляються
  * разом із вузлом. Інакше повертає зрозумілу причину; для вузлів з історією є "Архівувати".
  */
 export async function deleteOrgNode(nodeId: number, actorEmploymentId: number | null): Promise<{ ok: true } | { ok: false; error: string }> {
@@ -252,7 +252,6 @@ export async function deleteOrgNode(nodeId: number, actorEmploymentId: number | 
   if (node.children.length) reasons.push(`усередині є ${node.children.length} вкладених вузлів — спершу видаліть або перемістіть їх`);
   const withPeople = node.staffUnits.filter((su) => su._count.employments > 0);
   if (withPeople.length) reasons.push("на штатних одиницях є (або були) працівники");
-  if (node.staffUnits.some((su) => su._count.vacancies > 0)) reasons.push("є вакансії");
   const c = node._count;
   if (c.terminals) reasons.push("прив'язані термінали обліку часу");
   if (c.workShifts) reasons.push("є історія відпрацьованих змін");
@@ -270,6 +269,7 @@ export async function deleteOrgNode(nodeId: number, actorEmploymentId: number | 
   try {
     await prisma.$transaction([
       prisma.inspectionSchedule.deleteMany({ where: { orgNodeId: nodeId } }),
+      prisma.vacancy.deleteMany({ where: { staffUnit: { orgNodeId: nodeId } } }),
       prisma.staffUnit.deleteMany({ where: { orgNodeId: nodeId } }),
       prisma.orgNode.delete({ where: { id: nodeId } }),
     ]);
