@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "../../../../lib/prisma";
 import { getSessionPerson } from "../../../../lib/auth";
 import { canManageOrgStructure } from "../../../../lib/permissions";
-import { updateOrgNode } from "../../../../lib/orgstructure";
+import { deleteOrgNode, updateOrgNode } from "../../../../lib/orgstructure";
 import { EmploymentStatus } from "../../../../generated/prisma/client";
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -33,4 +33,20 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
   if (!result.ok) return NextResponse.json({ error: result.error }, { status: 400 });
   return NextResponse.json({ node: result.node });
+}
+
+export async function DELETE(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const session = await getSessionPerson();
+  if (!session) return NextResponse.json({ error: "Не залогований" }, { status: 401 });
+  if (!(await canManageOrgStructure(session.id))) {
+    return NextResponse.json({ error: "Немає права редагувати оргструктуру" }, { status: 403 });
+  }
+
+  const nodeId = Number((await params).id);
+  if (!Number.isInteger(nodeId)) return NextResponse.json({ error: "Невірний id вузла" }, { status: 400 });
+
+  const actor = await prisma.employment.findFirst({ where: { personId: session.id, status: { not: EmploymentStatus.TERMINATED } } });
+  const result = await deleteOrgNode(nodeId, actor?.id ?? null);
+  if (!result.ok) return NextResponse.json({ error: result.error }, { status: 409 });
+  return NextResponse.json({ ok: true });
 }

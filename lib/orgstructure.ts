@@ -35,9 +35,28 @@ async function subtreeHasActiveEmployees(nodeId: number): Promise<boolean> {
  * seed-скрипті: спершу створюємо з заглушкою, тоді дописуємо реальний path
  * на основі власного щойно виданого id — інакше id наперед невідомий.
  */
+/**
+ * Де який рівень може стояти (щоб не створити кластер усередині відділу тощо).
+ * Кластер/напрям — у компанії або в іншому напрямі; об'єкт (магазин, цех, склад) —
+ * у напрямі чи в компанії; відділ — в об'єкті, напрямі або іншому відділі.
+ */
+export const ALLOWED_PARENT_TYPES: Record<string, OrgNodeType[]> = {
+  DIVISION: [OrgNodeType.COMPANY, OrgNodeType.DIVISION],
+  OBJECT: [OrgNodeType.COMPANY, OrgNodeType.DIVISION],
+  DEPARTMENT: [OrgNodeType.DIVISION, OrgNodeType.OBJECT, OrgNodeType.DEPARTMENT],
+};
+
+const TYPE_NAME: Record<string, string> = { COMPANY: "компанії", DIVISION: "кластері/напрямі", OBJECT: "об'єкті", DEPARTMENT: "відділі" };
+
 export async function createOrgNode(input: OrgNodeInput, actorEmploymentId: number | null) {
   const parent = input.parentId ? await prisma.orgNode.findUnique({ where: { id: input.parentId } }) : null;
   if (input.parentId && !parent) return { ok: false as const, error: "Батьківський вузол не знайдено" };
+  const allowedParents = ALLOWED_PARENT_TYPES[input.type];
+  if (!allowedParents) return { ok: false as const, error: "Цей рівень створити не можна" };
+  if (!parent || !allowedParents.includes(parent.type)) {
+    const where = allowedParents.map((t) => TYPE_NAME[t]).join(", ");
+    return { ok: false as const, error: `Цей рівень можна створювати лише в: ${where}. Оберіть інший батьківський вузол.` };
+  }
 
   const created = await prisma.orgNode.create({
     data: {
@@ -196,4 +215,68 @@ export async function createOrgNodeFromTemplate(
   });
 
   return { ok: true as const, ...created };
+}
+
+/**
+ * Видалення вузла дерева. Дозволене лише для "порожнього" вузла: без дочірніх
+ * вузлів, без людей (навіть звільнених), вакансій, терміналів, ділянок, змін,
+ * обходів та іншої історії. Порожні штатні одиниці й розклад обходів видаляються
+ * разом із вузлом. Інакше повертає зрозумілу причину; для вузлів з історією є "Архівувати".
+ */
+export async function deleteOrgNode(nodeId: number, actorEmploymentId: number | null): Promise<{ ok: true } | { ok: false; error: string }> {
+  const node = await prisma.orgNode.findUnique({
+    where: { id: nodeId },
+    include: {
+      children: { select: { id: true } },
+      staffUnits: { include: { _count: { select: { employments: true, vacancies: true } } } },
+      _count: {
+        select: {
+          terminals: true,
+          workShifts: true,
+          areas: true,
+          inspections: true,
+          violations: true,
+          pendingHires: true,
+          announcements: true,
+          equipment: true,
+          roleAssignments: true,
+          positionAccessAssignments: true,
+        },
+      },
+    },
+  });
+  if (!node) return { ok: false, error: "Вузол не знайдено" };
+  if (node.type === OrgNodeType.COMPANY || !node.parentId) return { ok: false, error: "Кореневий вузол компанії видалити не можна" };
+
+  const reasons: string[] = [];
+  if (node.children.length) reasons.push(`усередині є ${node.children.length} вкладених вузлів — спершу видаліть або перемістіть їх`);
+  const withPeople = node.staffUnits.filter((su) => su._count.employments > 0);
+  if (withPeople.length) reasons.push("на штатних одиницях є (або були) працівники");
+  if (node.staffUnits.some((su) => su._count.vacancies > 0)) reasons.push("є вакансії");
+  const c = node._count;
+  if (c.terminals) reasons.push("прив'язані термінали обліку часу");
+  if (c.workShifts) reasons.push("є історія відпрацьованих змін");
+  if (c.areas) reasons.push("налаштовані ділянки");
+  if (c.inspections || c.violations) reasons.push("є історія обходів і порушень");
+  if (c.pendingHires) reasons.push("є очікувані реєстрації працівників");
+  if (c.announcements) reasons.push("є оголошення");
+  if (c.equipment) reasons.push("є обладнання");
+  if (c.roleAssignments || c.positionAccessAssignments) reasons.push("є призначення ролей чи прав на цей вузол");
+
+  if (reasons.length) {
+    return { ok: false, error: `Не можна видалити: ${reasons.join("; ")}. Якщо вузол більше не потрібен, використайте «Архівувати».` };
+  }
+
+  try {
+    await prisma.$transaction([
+      prisma.inspectionSchedule.deleteMany({ where: { orgNodeId: nodeId } }),
+      prisma.staffUnit.deleteMany({ where: { orgNodeId: nodeId } }),
+      prisma.orgNode.delete({ where: { id: nodeId } }),
+    ]);
+  } catch {
+    return { ok: false, error: "Не можна видалити: до вузла прив'язані інші дані. Скористайтесь «Архівувати»." };
+  }
+
+  await logAudit({ actorId: actorEmploymentId, action: "orgNode.deleted", entityType: "OrgNode", entityId: nodeId, diff: { name: node.name, type: node.type } });
+  return { ok: true };
 }

@@ -59,7 +59,35 @@ const NODE_TYPE_LABELS: Record<OrgNode["type"], string> = {
   DEPARTMENT: "Відділ",
 };
 
-/** Модальне вікно "Створити вузол" — форма поверх наявного дерева. */
+/** Які типи можуть бути батьком для кожного рівня (дзеркало правил на сервері, lib/orgstructure.ts). */
+const ALLOWED_PARENTS: Record<string, OrgNode["type"][]> = {
+  DIVISION: ["COMPANY", "DIVISION"],
+  OBJECT: ["COMPANY", "DIVISION"],
+  DEPARTMENT: ["DIVISION", "OBJECT", "DEPARTMENT"],
+};
+
+const LEVEL_CARDS: { type: "DIVISION" | "OBJECT" | "DEPARTMENT"; title: string; text: string; where: string }[] = [
+  {
+    type: "DIVISION",
+    title: "Кластер / напрям",
+    text: "Група магазинів чи підрозділів під одним керівником. Приклади: «Кластер 1», «Виробництво», «Адміністрація».",
+    where: "Створюється в компанії або всередині іншого напряму.",
+  },
+  {
+    type: "OBJECT",
+    title: "Об'єкт",
+    text: "Окреме місце роботи: магазин, пекарський цех або склад. Саме на об'єкт прив'язуються працівники, термінали, обходи.",
+    where: "Створюється всередині кластера / напряму.",
+  },
+  {
+    type: "DEPARTMENT",
+    title: "Відділ",
+    text: "Підрозділ усередині об'єкта чи напряму. Приклади: «Бухгалтерія», «Гастроном», «Каси».",
+    where: "Створюється всередині об'єкта або напряму.",
+  },
+];
+
+/** Модальне вікно "Створити вузол": спершу вибір рівня (картки з поясненням), потім — де його створити. */
 function CreateNodeModal({
   nodes,
   defaultParentId,
@@ -71,12 +99,18 @@ function CreateNodeModal({
   onClose: () => void;
   onCreated: () => void;
 }) {
-  const [type, setType] = useState<OrgNode["type"]>("DEPARTMENT");
+  const [type, setType] = useState<"DIVISION" | "OBJECT" | "DEPARTMENT">("OBJECT");
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
   const [parentId, setParentId] = useState(defaultParentId);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  const parentOptions = nodes.filter((n) => ALLOWED_PARENTS[type].includes(n.type));
+  // Якщо поточний батько не підходить обраному рівню — беремо перший підходящий.
+  const effectiveParentId = parentOptions.some((n) => n.id === parentId) ? parentId : (parentOptions[0]?.id ?? parentId);
+  const parent = nodes.find((n) => n.id === effectiveParentId);
+  const card = LEVEL_CARDS.find((c) => c.type === type)!;
 
   const submit = () => {
     if (!name.trim()) {
@@ -88,7 +122,7 @@ function CreateNodeModal({
     fetch("/api/org-nodes", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ type, name, code: code || null, parentId }),
+      body: JSON.stringify({ type, name, code: code || null, parentId: effectiveParentId }),
     })
       .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
       .then(({ ok, body }) => {
@@ -100,33 +134,42 @@ function CreateNodeModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4">
-      <div className="w-full max-w-md space-y-3 rounded-md border border-slate-200 bg-white p-5">
-        <h3 className="text-sm font-semibold text-slate-900">Створити вузол</h3>
+    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-900/40 px-4 py-6">
+      <div className="w-full max-w-lg space-y-4 rounded-md border border-slate-200 bg-white p-5">
+        <h3 className="text-sm font-semibold text-slate-900">Створити елемент структури</h3>
 
-        <div className="space-y-1">
-          <label className="block text-xs text-slate-600">Тип</label>
-          <select value={type} onChange={(e) => setType(e.target.value as OrgNode["type"])} className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm">
-            <option value="DIVISION">Напрям / кластер</option>
-            <option value="OBJECT">Об'єкт</option>
-            <option value="DEPARTMENT">Відділ</option>
-          </select>
+        <div className="space-y-1.5">
+          <p className="text-xs font-medium text-slate-600">1. Що створюємо?</p>
+          <div className="grid gap-2">
+            {LEVEL_CARDS.map((c) => (
+              <button
+                key={c.type}
+                type="button"
+                onClick={() => setType(c.type)}
+                className={`rounded-md border px-3 py-2 text-left ${type === c.type ? "border-slate-800 bg-slate-50 ring-1 ring-slate-800" : "border-slate-200 hover:bg-slate-50"}`}
+              >
+                <span className="text-sm font-semibold text-slate-900">{c.title}</span>
+                <span className="mt-0.5 block text-xs text-slate-600">{c.text}</span>
+                <span className="mt-0.5 block text-xs text-slate-400">{c.where}</span>
+              </button>
+            ))}
+          </div>
         </div>
 
         <div className="space-y-1">
-          <label className="block text-xs text-slate-600">Батьківський вузол</label>
-          <select value={parentId} onChange={(e) => setParentId(Number(e.target.value))} className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm">
-            {nodes.map((n) => (
+          <label className="block text-xs font-medium text-slate-600">2. Де створити (усередині чого)</label>
+          <select value={effectiveParentId} onChange={(e) => setParentId(Number(e.target.value))} className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm">
+            {parentOptions.map((n) => (
               <option key={n.id} value={n.id}>
                 {"— ".repeat(n.path.split(".").length - 1)}
-                {n.name}
+                {n.name} ({NODE_TYPE_LABELS[n.type]})
               </option>
             ))}
           </select>
         </div>
 
         <div className="space-y-1">
-          <label className="block text-xs text-slate-600">Назва</label>
+          <label className="block text-xs font-medium text-slate-600">3. Назва</label>
           <input value={name} onChange={(e) => setName(e.target.value)} autoFocus className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm" />
         </div>
 
@@ -134,6 +177,10 @@ function CreateNodeModal({
           <label className="block text-xs text-slate-600">Код (необов&rsquo;язково)</label>
           <input value={code} onChange={(e) => setCode(e.target.value)} className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm" />
         </div>
+
+        <p className="rounded bg-slate-50 px-3 py-2 text-xs text-slate-700">
+          Буде створено: <b>{card.title}</b> «{name.trim() || "…"}» усередині «{parent?.name ?? "—"}».
+        </p>
 
         {error && <p className="text-sm text-rose-700">{error}</p>}
 
@@ -469,6 +516,21 @@ export default function StructurePage() {
       .catch((e) => setEditError(e.message));
   };
 
+  const removeNode = () => {
+    if (!staffing) return;
+    if (!confirm(`Видалити «${staffing.node.name}» остаточно? Це можливо лише для порожнього елемента без людей та історії.`)) return;
+    setEditError(null);
+    const parentId = staffing.node.parentId;
+    fetch(`/api/org-nodes/${staffing.node.id}`, { method: "DELETE" })
+      .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
+      .then(({ ok, body }) => {
+        if (!ok) throw new Error(body.error ?? "Не вдалося видалити");
+        if (parentId) setSelectedId(parentId);
+        loadTree().catch(() => {});
+      })
+      .catch((e) => setEditError(e.message));
+  };
+
   const move = () => {
     if (!staffing || moveTargetId == null) return;
     setMoveBusy(true);
@@ -678,6 +740,11 @@ export default function StructurePage() {
                         >
                           {staffing.node.isActive ? "Архівувати" : "Активувати"}
                         </button>
+                        {staffing.node.parentId !== null && (
+                          <button onClick={removeNode} className="rounded border border-rose-300 px-3 py-1.5 text-sm font-medium text-rose-700 hover:bg-rose-50">
+                            Видалити
+                          </button>
+                        )}
                       </div>
                       {editError && <p className="col-span-2 text-sm text-rose-700">{editError}</p>}
                     </div>
