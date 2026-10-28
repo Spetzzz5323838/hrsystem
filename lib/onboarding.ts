@@ -130,7 +130,32 @@ async function notifyEmployeeMarkTask(task: {
  * покриває вузол працівника. Якщо кандидатів декілька — береться той,
  * чия область найточніша (найдовший шлях).
  */
-export async function resolveAssignee(role: Role, targetOrgNodePath: string): Promise<number | null> {
+export async function resolveAssignee(role: Role, targetOrgNodePath: string, excludeEmploymentId?: number): Promise<number | null> {
+  const found = await findAssigneeByRole(role, targetOrgNodePath, excludeEmploymentId);
+  if (found !== null || excludeEmploymentId === undefined) return found;
+  // Виконавця немає, бо єдиний кандидат — сам працівник (напр. новий адміністратор
+  // магазину, якого онбордить "адміністратор магазину"): людина не може погоджувати
+  // сама себе, тож задача йде вгору — голові підрозділу, далі COO, далі сисадміну.
+  return escalateAssignee(targetOrgNodePath, excludeEmploymentId);
+}
+
+async function escalateAssignee(targetOrgNodePath: string, excludeEmploymentId: number): Promise<number | null> {
+  const ancestorIds = targetOrgNodePath.split(".").map(Number).filter(Number.isInteger);
+  const nodes = await prisma.orgNode.findMany({ where: { id: { in: ancestorIds }, headEmploymentId: { not: null } }, select: { path: true, headEmploymentId: true } });
+  nodes.sort((a, b) => b.path.length - a.path.length);
+  for (const n of nodes) {
+    if (n.headEmploymentId === excludeEmploymentId) continue;
+    const head = await prisma.employment.findUnique({ where: { id: n.headEmploymentId! }, select: { id: true, status: true } });
+    if (head && head.status === EmploymentStatus.ACTIVE) return head.id;
+  }
+  for (const role of [Role.COO, Role.SYSADMIN]) {
+    const id = await findAssigneeByRole(role, targetOrgNodePath, excludeEmploymentId);
+    if (id !== null) return id;
+  }
+  return null;
+}
+
+async function findAssigneeByRole(role: Role, targetOrgNodePath: string, excludeEmploymentId?: number): Promise<number | null> {
   const bySystemRole = await prisma.employment.findMany({
     where: { status: { not: EmploymentStatus.TERMINATED }, staffUnit: { positionProfile: { systemRole: role } } },
     select: { id: true, staffUnit: { select: { orgNode: { select: { path: true } } } } },
@@ -144,11 +169,13 @@ export async function resolveAssignee(role: Role, targetOrgNodePath: string): Pr
   const candidates: { employmentId: number; path: string }[] = [];
 
   for (const e of bySystemRole) {
+    if (e.id === excludeEmploymentId) continue;
     if (hasAccess(e.staffUnit.orgNode.path, targetOrgNodePath)) {
       candidates.push({ employmentId: e.id, path: e.staffUnit.orgNode.path });
     }
   }
   for (const e of byRoleAssignment) {
+    if (e.id === excludeEmploymentId) continue;
     for (const ra of e.roleAssignments) {
       if (hasAccess(ra.orgNode.path, targetOrgNodePath)) {
         candidates.push({ employmentId: e.id, path: ra.orgNode.path });
@@ -244,7 +271,7 @@ export async function startOnboarding(employmentId: number): Promise<{ instanceI
     } else if (item.responsibleRole === Role.CURATOR) {
       assigneeId = employment.curatorId;
     } else if (item.responsibleRole) {
-      assigneeId = await resolveAssignee(item.responsibleRole, targetPath);
+      assigneeId = await resolveAssignee(item.responsibleRole, targetPath, employment.id);
     }
 
     const dueAt = item.slaHours != null ? new Date(now.getTime() + item.slaHours * 60 * 60 * 1000) : null;

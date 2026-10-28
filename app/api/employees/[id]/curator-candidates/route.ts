@@ -20,13 +20,19 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
 
   const objectPath = (await findAncestorPath(employment.staffUnit.orgNode.path, OrgNodeType.OBJECT)) ?? employment.staffUnit.orgNode.path;
 
-  const candidates = await prisma.employment.findMany({
+  // Куратор — з цього ж об'єкта АБО зі штатної одиниці вище по дереву (директор кластера,
+  // власник): інакше перший адміністратор нового магазину не мав би кого обрати куратором.
+  const allCandidates = await prisma.employment.findMany({
     where: {
       id: { not: employmentId },
       status: EmploymentStatus.ACTIVE,
-      staffUnit: { positionProfile: { canBeCurator: true }, orgNode: { path: objectPath } },
+      staffUnit: { positionProfile: { canBeCurator: true } },
     },
-    include: { person: true, staffUnit: { include: { positionProfile: true } } },
+    include: { person: true, staffUnit: { include: { positionProfile: true, orgNode: true } } },
+  });
+  const candidates = allCandidates.filter((c) => {
+    const p = c.staffUnit.orgNode.path;
+    return p === objectPath || objectPath.startsWith(`${p}.`);
   });
 
   return NextResponse.json(

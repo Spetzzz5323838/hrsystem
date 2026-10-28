@@ -548,6 +548,12 @@ const testUsers: TestUserSeed[] = [
 ];
 
 async function seedTestUsers() {
+  // Бойовий режим: перший адміністратор створюється ЛИШЕ в порожній базі. Якщо люди вже є
+  // (посаду могли перейменувати, користувачів додати), повторний seed їх не чіпає.
+  if (PRODUCTION_SEED && (await prisma.person.count()) > 0) {
+    console.log("Бойовий seed: користувачі вже є — створення першого адміністратора пропущено.");
+    return;
+  }
   const root = await prisma.orgNode.findUniqueOrThrow({ where: { code: "ROOT" } });
 
   let users: TestUserSeed[] = testUsers;

@@ -109,7 +109,7 @@ export async function startTransfer(
       // наявний Employment.curatorId (з онбордингу чи попереднього призначення).
       assigneeId = employment.curatorId;
     } else if (item.responsibleRole) {
-      assigneeId = await resolveAssignee(item.responsibleRole, targetStaffUnit.orgNode.path);
+      assigneeId = await resolveAssignee(item.responsibleRole, targetStaffUnit.orgNode.path, employment.id);
     }
 
     const dueAt = item.slaHours != null ? new Date(now.getTime() + item.slaHours * 60 * 60 * 1000) : null;

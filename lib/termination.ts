@@ -112,7 +112,7 @@ export async function startTermination(
       // completeTerminationTask сам закриє його, коли решта пунктів готова.
       assigneeId = null;
     } else if (item.responsibleRole) {
-      assigneeId = await resolveAssignee(item.responsibleRole, targetPath);
+      assigneeId = await resolveAssignee(item.responsibleRole, targetPath, employment.id);
     }
 
     const dueAt = item.slaHours != null ? new Date(now.getTime() + item.slaHours * 60 * 60 * 1000) : null;

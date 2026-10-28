@@ -264,6 +264,7 @@ function Checklist({
   onEditProfileFields,
   canForceComplete,
   onForceComplete,
+  onReassign,
   forceCompleteBusyId,
 }: {
   tasks: TaskRow[];
@@ -275,6 +276,7 @@ function Checklist({
   onEditProfileFields?: () => void;
   canForceComplete?: boolean;
   onForceComplete?: (taskId: number) => void;
+  onReassign?: (taskId: number) => void;
   forceCompleteBusyId?: number | null;
 }) {
   const firstOpen = tasks.findIndex((t) => t.status !== "DONE" && t.isBlocking);
@@ -358,6 +360,15 @@ function Checklist({
                         title="Сисадмін: завершити примусово, якщо виконавець недоступний"
                       >
                         завершити примусово
+                      </button>
+                    )}
+                    {canForceComplete && onReassign && (
+                      <button
+                        onClick={() => onReassign(t.taskId)}
+                        className="text-slate-600 underline underline-offset-2 hover:text-slate-900"
+                        title="Передати пункт іншому виконавцю, якщо система призначила не ту людину"
+                      >
+                        передати іншому
                       </button>
                     )}
                   </span>
@@ -1090,6 +1101,43 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
   const [canForceComplete, setCanForceComplete] = useState(false);
   const [forceCompleteBusyId, setForceCompleteBusyId] = useState<number | null>(null);
   const [forceCompleteError, setForceCompleteError] = useState<string | null>(null);
+
+  // Передача задачі іншому виконавцю (коли система призначила не ту людину).
+  const [reassignTaskId, setReassignTaskId] = useState<number | null>(null);
+  const [reassignOptions, setReassignOptions] = useState<{ employmentId: number; fullName: string; positionTitle: string; objectName: string }[]>([]);
+  const [reassignTo, setReassignTo] = useState("");
+  const [reassignError, setReassignError] = useState<string | null>(null);
+  const [reassignBusy, setReassignBusy] = useState(false);
+
+  const openReassign = (taskId: number) => {
+    setReassignTaskId(taskId);
+    setReassignTo("");
+    setReassignError(null);
+    setReassignOptions([]);
+    fetch(`/api/tasks/${taskId}/reassign`)
+      .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
+      .then(({ ok, body }) => {
+        if (!ok) throw new Error(body.error ?? "Не вдалося завантажити список");
+        setReassignOptions(body);
+      })
+      .catch((e) => setReassignError(e.message));
+  };
+  const submitReassign = () => {
+    if (reassignTaskId === null || !reassignTo) return;
+    setReassignBusy(true);
+    setReassignError(null);
+    fetch(`/api/tasks/${reassignTaskId}/reassign`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ toEmploymentId: Number(reassignTo) }) })
+      .then((r) => r.json().then((body) => ({ ok: r.ok, body })))
+      .then(({ ok, body }) => {
+        if (!ok) throw new Error(body.error ?? "Не вдалося передати");
+        setReassignTaskId(null);
+        loadOnboarding();
+        loadTransfer();
+        loadTermination();
+      })
+      .catch((e) => setReassignError(e.message))
+      .finally(() => setReassignBusy(false));
+  };
 
   const forceCompleteTask = (taskId: number) => {
     if (!confirm("Примусово завершити цей пункт чек-листа?")) return;
@@ -2231,6 +2279,28 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
           <>
             {onboardingError && <p className="text-sm text-rose-700">{onboardingError}</p>}
             {forceCompleteError && <p className="text-sm text-rose-700">{forceCompleteError}</p>}
+            {reassignTaskId !== null && (
+              <div className="rounded-md border border-slate-300 bg-white p-4">
+                <p className="text-sm font-medium text-slate-800">Кому передати цей пункт?</p>
+                <select value={reassignTo} onChange={(e) => setReassignTo(e.target.value)} className="mt-2 w-full max-w-md rounded border border-slate-300 bg-white px-2 py-1.5 text-sm">
+                  <option value="">— оберіть людину —</option>
+                  {reassignOptions.map((o) => (
+                    <option key={o.employmentId} value={o.employmentId}>
+                      {o.fullName} · {o.positionTitle} · {o.objectName}
+                    </option>
+                  ))}
+                </select>
+                {reassignError && <p className="mt-2 text-sm text-rose-700">{reassignError}</p>}
+                <div className="mt-3 flex gap-2">
+                  <button disabled={!reassignTo || reassignBusy} onClick={submitReassign} className="rounded bg-slate-900 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50">
+                    Передати
+                  </button>
+                  <button onClick={() => setReassignTaskId(null)} className="rounded border border-slate-300 px-3 py-1.5 text-sm">
+                    Скасувати
+                  </button>
+                </div>
+              </div>
+            )}
             {!onboarding ? (
               <div className="border border-dashed border-slate-300 bg-white rounded-md px-6 py-12 text-center text-sm text-slate-500">
                 Завантаження…
@@ -2269,6 +2339,7 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
                   }}
                   canForceComplete={canForceComplete}
                   onForceComplete={forceCompleteTask}
+                  onReassign={openReassign}
                   forceCompleteBusyId={forceCompleteBusyId}
                 />
               </Section>
@@ -2399,6 +2470,7 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
                   busyTaskId={transferBusyTaskId}
                   canForceComplete={canForceComplete}
                   onForceComplete={forceCompleteTask}
+                  onReassign={openReassign}
                   forceCompleteBusyId={forceCompleteBusyId}
                 />
               </Section>
@@ -2472,6 +2544,7 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
                     busyTaskId={terminationBusyTaskId}
                     canForceComplete={canForceComplete}
                     onForceComplete={forceCompleteTask}
+                  onReassign={openReassign}
                     forceCompleteBusyId={forceCompleteBusyId}
                   />
                 </Section>
