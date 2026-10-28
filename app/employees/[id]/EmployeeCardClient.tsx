@@ -2,6 +2,7 @@
 
 import ExtraObjectsBlock from "./ExtraObjectsBlock";
 import TrainingTab from "./TrainingTab";
+import TimesheetCorrectionsTab from "./TimesheetCorrectionsTab";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { AlertTriangle, ArrowLeft, Award, Camera, Check, Clock, Eye, Lock, Phone, Star, ThumbsDown, ThumbsUp, X } from "lucide-react";
@@ -393,6 +394,7 @@ const TABS = [
   ["termination", "Звільнення"],
   ["comp", "Компетенції"],
   ["training", "Навчання"],
+  ["tscorr", "Правки табеля"],
   ["docs", "Документи"],
   ["rating", "Рейтинг"],
   ["review", "Квартальна оцінка"],
@@ -2590,6 +2592,7 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
         )}
 
         {tab === "training" && <TrainingTab employmentId={employmentId} />}
+        {tab === "tscorr" && <TimesheetCorrectionsTab employmentId={employmentId} />}
 
         {tab === "comp" && (
           <Section

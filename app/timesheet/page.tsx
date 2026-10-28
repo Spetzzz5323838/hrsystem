@@ -3,6 +3,7 @@
 import { Fragment, useEffect, useState } from "react";
 import Link from "next/link";
 import AppShell from "../components/AppShell";
+import { CORRECTION_REASONS } from "../../lib/timesheetReasons";
 
 type Shift = {
   id: number;
@@ -14,6 +15,7 @@ type Shift = {
   closeKind: "TERMINAL" | "MANUAL" | "AUTO" | null;
   editedByName: string | null;
   editReason: string | null;
+  cancelled: boolean;
 };
 type Employee = {
   employmentId: number;
@@ -23,6 +25,8 @@ type Employee = {
   shiftCount: number;
   autoClosedCount: number;
   editedCount: number;
+  correctionsCount: number;
+  frequentlyCorrected: boolean;
   hasOpenShift: boolean;
   shifts: Shift[];
 };
@@ -53,6 +57,7 @@ export default function TimesheetPage() {
   const [endVal, setEndVal] = useState("");
   const [storeVal, setStoreVal] = useState("");
   const [reason, setReason] = useState("");
+  const [comment, setComment] = useState("");
   const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -75,6 +80,7 @@ export default function TimesheetPage() {
     setStartVal(toLocalInput(s.startedAt));
     setEndVal(toLocalInput(s.endedAt));
     setReason("");
+    setComment("");
     setFormError(null);
   };
   const openAdd = (e: Employee) => {
@@ -84,6 +90,7 @@ export default function TimesheetPage() {
     setEndVal("");
     setStoreVal(objectId || String(data?.objects.find((o) => o.canEdit)?.id ?? ""));
     setReason("");
+    setComment("");
     setFormError(null);
   };
 
@@ -91,8 +98,8 @@ export default function TimesheetPage() {
     setBusy(true);
     setFormError(null);
     const body = editing
-      ? { startedAt: new Date(startVal).toISOString(), endedAt: endVal ? new Date(endVal).toISOString() : null, reason }
-      : { employmentId: adding!.employmentId, orgNodeId: Number(storeVal), startedAt: new Date(startVal).toISOString(), endedAt: new Date(endVal).toISOString(), reason };
+      ? { startedAt: new Date(startVal).toISOString(), endedAt: endVal ? new Date(endVal).toISOString() : null, reason, comment }
+      : { employmentId: adding!.employmentId, orgNodeId: Number(storeVal), startedAt: new Date(startVal).toISOString(), endedAt: new Date(endVal).toISOString(), reason, comment };
     fetch(editing ? `/api/shifts/${editing.shift.id}` : "/api/shifts", {
       method: editing ? "PATCH" : "POST",
       headers: { "Content-Type": "application/json" },
@@ -103,6 +110,22 @@ export default function TimesheetPage() {
         if (!r.ok) throw new Error(b.error ?? "Не вдалося зберегти");
         setEditing(null);
         setAdding(null);
+        setRefresh((x) => x + 1);
+      })
+      .catch((e) => setFormError(e.message))
+      .finally(() => setBusy(false));
+  };
+
+  const cancelShift = () => {
+    if (!editing) return;
+    if (!confirm("Скасувати цю зміну? Вона лишиться в журналі правок, але години не рахуватимуться.")) return;
+    setBusy(true);
+    setFormError(null);
+    fetch(`/api/shifts/${editing.shift.id}/cancel`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reason, comment }) })
+      .then((r) => r.json().then((b) => ({ r, b })))
+      .then(({ r, b }) => {
+        if (!r.ok) throw new Error(b.error ?? "Не вдалося скасувати");
+        setEditing(null);
         setRefresh((x) => x + 1);
       })
       .catch((e) => setFormError(e.message))
@@ -142,6 +165,9 @@ export default function TimesheetPage() {
           <Link href="/timesheet/report" className="rounded border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50">
             Звіт по днях
           </Link>
+          <Link href="/timesheet/journal" className="rounded border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50">
+            Журнал правок
+          </Link>
           <input type="month" value={month} onChange={(e) => e.target.value && setMonth(e.target.value)} className="rounded border border-slate-300 bg-white px-2 py-1.5 text-sm" />
           <select value={objectId} onChange={(e) => setObjectId(e.target.value)} className="rounded border border-slate-300 bg-white px-2 py-1.5 text-sm">
             <option value="">Усі магазини</option>
@@ -179,17 +205,38 @@ export default function TimesheetPage() {
                 Завершення {editing && <span className="text-slate-400">(порожньо — зміна відкрита)</span>}
                 <input type="datetime-local" value={endVal} onChange={(e) => setEndVal(e.target.value)} className="mt-0.5 block rounded border border-slate-300 bg-white px-2 py-1.5 text-sm" />
               </label>
-              <label className="grow text-xs text-slate-600">
+              <label className="text-xs text-slate-600">
                 Причина (обов&rsquo;язково)
-                <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Напр.: забув відмітитись, зламаний сканер" className="mt-0.5 block w-full rounded border border-slate-300 bg-white px-2 py-1.5 text-sm" />
+                <select value={reason} onChange={(e) => setReason(e.target.value)} className="mt-0.5 block rounded border border-slate-300 bg-white px-2 py-1.5 text-sm">
+                  <option value="">— оберіть причину —</option>
+                  {CORRECTION_REASONS.map((r) => (
+                    <option key={r.value} value={r.value}>
+                      {r.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="grow text-xs text-slate-600">
+                Коментар {reason === "OTHER" ? "(обов’язково)" : "(бажано)"}
+                <input value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Що саме сталося" className="mt-0.5 block w-full rounded border border-slate-300 bg-white px-2 py-1.5 text-sm" />
               </label>
               <button
-                disabled={busy || !startVal || (!!adding && (!endVal || !storeVal)) || reason.trim().length < 3}
+                disabled={busy || !startVal || (!!adding && (!endVal || !storeVal)) || !reason || (reason === "OTHER" && comment.trim().length < 3)}
                 onClick={save}
                 className="rounded bg-slate-900 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
               >
                 Зберегти
               </button>
+              {editing && (
+                <button
+                  disabled={busy || !reason || (reason === "OTHER" && comment.trim().length < 3)}
+                  onClick={cancelShift}
+                  title="Помилкова чи дубльована зміна: лишається в журналі, години не рахуються"
+                  className="rounded border border-rose-300 bg-white px-3 py-1.5 text-sm font-medium text-rose-700 disabled:opacity-50"
+                >
+                  Скасувати зміну
+                </button>
+              )}
               <button
                 onClick={() => {
                   setEditing(null);
@@ -227,7 +274,12 @@ export default function TimesheetPage() {
                     <td className="px-4 py-2 text-xs">
                       {e.hasOpenShift && <span className="mr-1 rounded bg-sky-50 px-1.5 py-0.5 text-sky-700">відкрита зміна</span>}
                       {e.autoClosedCount > 0 && <span className="mr-1 rounded bg-amber-50 px-1.5 py-0.5 text-amber-800">автозакрито: {e.autoClosedCount}</span>}
-                      {e.editedCount > 0 && <span className="rounded bg-slate-100 px-1.5 py-0.5 text-slate-600">виправлено: {e.editedCount}</span>}
+                      {e.editedCount > 0 && <span className="mr-1 rounded bg-slate-100 px-1.5 py-0.5 text-slate-600">виправлено: {e.editedCount}</span>}
+                      {e.frequentlyCorrected && (
+                        <span className="rounded bg-rose-50 px-1.5 py-0.5 text-rose-700" title="Багато правок за місяць: не відмічається чи проблема з терміналом">
+                          часто виправляється: {e.correctionsCount}
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-2 text-right text-xs text-slate-400">{openId === e.employmentId ? "▲" : "▼"}</td>
                   </tr>
@@ -237,15 +289,16 @@ export default function TimesheetPage() {
                         <table className="w-full text-xs">
                           <tbody className="divide-y divide-slate-200">
                             {e.shifts.map((s) => (
-                              <tr key={s.id}>
+                              <tr key={s.id} className={s.cancelled ? "text-slate-400 line-through" : ""}>
                                 <td className="py-1 text-slate-700">
                                   {dt(s.startedAt)} — {s.endedAt ? dt(s.endedAt) : <span className="text-sky-700">триває</span>}
                                 </td>
                                 <td className="py-1 tabular-nums text-slate-700">{hm(s.minutes)}</td>
                                 <td className="py-1 text-slate-500">{s.storeName}</td>
                                 <td className="py-1 text-slate-500">
-                                  {s.closeKind === "AUTO" && <span className="text-amber-800">закрито автоматично (6 год)</span>}
-                                  {s.closeKind === "MANUAL" && <span>виправлено вручну</span>}
+                                  {s.cancelled && <span className="no-underline">скасовано</span>}
+                                  {!s.cancelled && s.closeKind === "AUTO" && <span className="text-amber-800">закрито автоматично (6 год)</span>}
+                                  {!s.cancelled && s.closeKind === "MANUAL" && <span>виправлено вручну</span>}
                                   {s.editedByName && (
                                     <span className="ml-1 text-slate-400">
                                       · {s.editedByName}: {s.editReason}

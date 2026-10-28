@@ -2,10 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "../../../../lib/prisma";
 import { getSessionPerson } from "../../../../lib/auth";
 import { can } from "../../../../lib/permissions";
-import { editShift } from "../../../../lib/timesheet";
+import { canEditClosedPeriod, editShift } from "../../../../lib/timesheet";
 import { Capability, EmploymentStatus } from "../../../../generated/prisma/client";
 
-/** Виправлення часу зміни: { startedAt, endedAt | null, reason }. Відкриту зміну можна закрити, передавши endedAt. */
+/** Виправлення часу зміни: { startedAt, endedAt | null, reason (код зі списку), comment }. Відкриту зміну можна закрити, передавши endedAt. */
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getSessionPerson();
   if (!session) return NextResponse.json({ error: "Не залогований" }, { status: 401 });
@@ -29,8 +29,10 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       startedAt: new Date(body?.startedAt),
       endedAt: body?.endedAt ? new Date(body.endedAt) : null,
       reason: typeof body?.reason === "string" ? body.reason : "",
+      comment: typeof body?.comment === "string" ? body.comment : "",
     },
     actor.id,
+    await canEditClosedPeriod(session.id),
   );
   if (!result.ok) return NextResponse.json({ error: result.error }, { status: 400 });
   return NextResponse.json({ ok: true });

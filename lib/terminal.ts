@@ -203,7 +203,7 @@ export async function confirmScan(input: {
     // Відмітка не може перетнутися з уже записаними змінами працівника.
     if (lookup.action === ScanAction.ARRIVAL) {
       const later = await prisma.workShift.findFirst({
-        where: { employmentId: lookup.employmentId, OR: [{ startedAt: { gte: scannedAt } }, { endedAt: { gt: scannedAt } }] },
+        where: { employmentId: lookup.employmentId, cancelledAt: null, OR: [{ startedAt: { gte: scannedAt } }, { endedAt: { gt: scannedAt } }] },
       });
       if (later) return { ok: false, error: `${lookup.fullName}: час відмітки перетинається з уже записаною зміною — виправте в табелі` };
     } else {

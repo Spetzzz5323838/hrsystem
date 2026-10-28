@@ -88,6 +88,7 @@ export async function getDailyReport(
 
   const shifts = await prisma.workShift.findMany({
     where: {
+      cancelledAt: null,
       startedAt: { gte: fromDay, lt: new Date(toDay.getFullYear(), toDay.getMonth(), toDay.getDate() + 1) },
       employment: term ? { person: { fullName: { contains: term, mode: "insensitive" } } } : undefined,
     },
@@ -152,7 +153,7 @@ export async function listUnitOptions(scopePaths: string[]): Promise<UnitOption[
  */
 export async function getPersonMonthMinutes(personId: number, year: number, month: number): Promise<{ minutes: number; hasOpenShift: boolean }> {
   const shifts = await prisma.workShift.findMany({
-    where: { employment: { personId }, startedAt: { gte: new Date(year, month, 1), lt: new Date(year, month + 1, 1) } },
+    where: { cancelledAt: null, employment: { personId }, startedAt: { gte: new Date(year, month, 1), lt: new Date(year, month + 1, 1) } },
     select: { startedAt: true, endedAt: true },
   });
   const now = Date.now();

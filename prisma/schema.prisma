@@ -255,12 +255,13 @@ model OrgNode {
   inspections               Inspection[]
 
   /// Час відкриття магазину "ГГ:ХХ" (етап 5) — від нього через 30 хв перевіряється, чи є персонал на ділянках. Порожньо — перевірки немає.
-  openTime          String?
+  openTime             String?
   /// Дата, коли перевірку "ділянка без персоналу" вже зроблено (раз на добу).
-  staffingCheckedOn DateTime?      @db.Date
-  announcements     Announcement[]
-  polls             Poll[]
-  violations        Violation[]
+  staffingCheckedOn    DateTime?             @db.Date
+  announcements        Announcement[]
+  polls                Poll[]
+  violations           Violation[]
+  timesheetCorrections TimesheetCorrection[]
 
   @@index([path])
 }
@@ -431,41 +432,44 @@ model Employment {
   roleAssignments RoleAssignment[]
 
   processInstances            ProcessInstance[]
-  assignedTasks               Task[]               @relation("TaskAssignee")
-  completedTasks              Task[]               @relation("TaskCompletedBy")
-  authoredRatingEvents        RatingEvent[]        @relation("RatingEventAuthor")
-  awardedBadges               BadgeAward[]         @relation("BadgeAwardedBy")
+  assignedTasks               Task[]                @relation("TaskAssignee")
+  completedTasks              Task[]                @relation("TaskCompletedBy")
+  authoredRatingEvents        RatingEvent[]         @relation("RatingEventAuthor")
+  awardedBadges               BadgeAward[]          @relation("BadgeAwardedBy")
   clearanceSheets             ClearanceSheet[]
   uploadedDocuments           Document[]
-  updatedMaterials            Material[]           @relation("MaterialContentUpdatedBy")
+  updatedMaterials            Material[]            @relation("MaterialContentUpdatedBy")
   responsibleEquipment        Equipment[]
-  equipmentEvents             EquipmentEvent[]     @relation("EquipmentEventEmployment")
-  performedEquipmentEvents    EquipmentEvent[]     @relation("EquipmentEventPerformedBy")
+  equipmentEvents             EquipmentEvent[]      @relation("EquipmentEventEmployment")
+  performedEquipmentEvents    EquipmentEvent[]      @relation("EquipmentEventPerformedBy")
   auditActions                AuditLog[]
   attestationAttempts         AttestationAttempt[]
-  gradedAttestations          AttestationAttempt[] @relation("AttestationGradedBy")
+  gradedAttestations          AttestationAttempt[]  @relation("AttestationGradedBy")
   reviews                     Review[]
-  confirmedReviews            Review[]             @relation("ReviewConfirmedBy")
-  createdReviews              Review[]             @relation("ReviewCreatedBy")
+  confirmedReviews            Review[]              @relation("ReviewConfirmedBy")
+  createdReviews              Review[]              @relation("ReviewCreatedBy")
   vacationRequests            VacationRequest[]
-  createdVacationRequests     VacationRequest[]    @relation("VacationCreatedBy")
-  decidedVacationRequests     VacationRequest[]    @relation("VacationDecidedBy")
-  remindersAbout              Reminder[]           @relation("ReminderAboutEmployment")
-  authoredReminders           Reminder[]           @relation("ReminderAuthor")
-  curatorEligibilities        CuratorEligibility[] @relation("CuratorEligibilities")
-  grantedCuratorEligibilities CuratorEligibility[] @relation("CuratorEligibilityGrantedBy")
-  createdVacancies            Vacancy[]            @relation("VacancyCreatedBy")
-  registeredTerminals         Terminal[]           @relation("TerminalRegisteredBy")
-  workShiftsOf                WorkShift[]          @relation("WorkShiftEmployment")
-  editedShifts                WorkShift[]          @relation("WorkShiftEditedBy")
-  scanEventsAsEmployee        ScanEvent[]          @relation("ScanEventEmployment")
-  scanEventsAsOperator        ScanEvent[]          @relation("ScanEventOperator")
-  closedVacancies             Vacancy[]            @relation("VacancyClosedBy")
-  authoredAnnouncements       Announcement[]       @relation("AnnouncementAuthor")
-  authoredPolls               Poll[]               @relation("PollAuthor")
-  violationsAbout             Violation[]          @relation("ViolationSubject")
-  violationsTaken             Violation[]          @relation("ViolationTakenBy")
-  violationsResolved          Violation[]          @relation("ViolationResolvedBy")
+  createdVacationRequests     VacationRequest[]     @relation("VacationCreatedBy")
+  decidedVacationRequests     VacationRequest[]     @relation("VacationDecidedBy")
+  remindersAbout              Reminder[]            @relation("ReminderAboutEmployment")
+  authoredReminders           Reminder[]            @relation("ReminderAuthor")
+  curatorEligibilities        CuratorEligibility[]  @relation("CuratorEligibilities")
+  grantedCuratorEligibilities CuratorEligibility[]  @relation("CuratorEligibilityGrantedBy")
+  createdVacancies            Vacancy[]             @relation("VacancyCreatedBy")
+  registeredTerminals         Terminal[]            @relation("TerminalRegisteredBy")
+  workShiftsOf                WorkShift[]           @relation("WorkShiftEmployment")
+  editedShifts                WorkShift[]           @relation("WorkShiftEditedBy")
+  scanEventsAsEmployee        ScanEvent[]           @relation("ScanEventEmployment")
+  scanEventsAsOperator        ScanEvent[]           @relation("ScanEventOperator")
+  closedVacancies             Vacancy[]             @relation("VacancyClosedBy")
+  authoredAnnouncements       Announcement[]        @relation("AnnouncementAuthor")
+  authoredPolls               Poll[]                @relation("PollAuthor")
+  violationsAbout             Violation[]           @relation("ViolationSubject")
+  violationsTaken             Violation[]           @relation("ViolationTakenBy")
+  violationsResolved          Violation[]           @relation("ViolationResolvedBy")
+  timesheetCorrectionsAbout   TimesheetCorrection[] @relation("TimesheetCorrectionWorker")
+  timesheetCorrectionsMade    TimesheetCorrection[] @relation("TimesheetCorrectionActor")
+  shiftsCancelled             WorkShift[]           @relation("WorkShiftCancelledBy")
 
   @@index([personId])
   @@index([staffUnitId])
@@ -1323,7 +1327,11 @@ model WorkShift {
   editedBy        Employment?     @relation("WorkShiftEditedBy", fields: [editedById], references: [id])
   editReason      String?
 
-  scanEvents ScanEvent[]
+  scanEvents    ScanEvent[]
+  cancelledAt   DateTime?
+  cancelledById Int?
+  cancelledBy   Employment?           @relation("WorkShiftCancelledBy", fields: [cancelledById], references: [id])
+  corrections   TimesheetCorrection[]
 
   @@index([employmentId, endedAt])
   @@index([orgNodeId, startedAt])
@@ -1586,4 +1594,55 @@ model TrainingChange {
   notifiedAt        DateTime?
 
   @@index([notifiedAt])
+}
+
+enum TimesheetCorrectionKind {
+  EDIT
+  CREATE
+  CANCEL
+  AUTO_CLOSE
+}
+
+enum TimesheetCorrectionReason {
+  FORGOT_ARRIVAL
+  FORGOT_DEPARTURE
+  TERMINAL_FAILURE
+  MARKED_BY_MISTAKE
+  OFF_TERMINAL_WORK
+  OTHER
+  AUTO_CLOSE
+}
+
+/// Журнал правок табеля (2026-10-28): записи лише додаються, не редагуються.
+/// Відповідає на питання "хто, коли, чому і на скільки змінив робочий час працівника".
+model TimesheetCorrection {
+  id              Int                       @id @default(autoincrement())
+  kind            TimesheetCorrectionKind
+  shiftId         Int
+  shift           WorkShift                 @relation(fields: [shiftId], references: [id])
+  /// Працівник, чий час змінено.
+  employmentId    Int
+  employment      Employment                @relation("TimesheetCorrectionWorker", fields: [employmentId], references: [id])
+  orgNodeId       Int
+  orgNode         OrgNode                   @relation(fields: [orgNodeId], references: [id])
+  reason          TimesheetCorrectionReason
+  comment         String?
+  beforeStartedAt DateTime?
+  beforeEndedAt   DateTime?
+  afterStartedAt  DateTime?
+  afterEndedAt    DateTime?
+  beforeMinutes   Int?
+  afterMinutes    Int?
+  /// Різниця в хвилинах (після мінус до); для скасування — мінус уся тривалість.
+  deltaMinutes    Int                       @default(0)
+  /// Автор правки; null — система (автозакриття).
+  actorId         Int?
+  actor           Employment?               @relation("TimesheetCorrectionActor", fields: [actorId], references: [id])
+  /// Правка зроблена після закриття періоду (після 15 числа наступного місяця).
+  periodClosed    Boolean                   @default(false)
+  createdAt       DateTime                  @default(now())
+
+  @@index([employmentId, createdAt])
+  @@index([orgNodeId, createdAt])
+  @@index([shiftId])
 }

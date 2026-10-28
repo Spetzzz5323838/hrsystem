@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "../../../lib/prisma";
 import { getSessionPerson } from "../../../lib/auth";
 import { can } from "../../../lib/permissions";
-import { createManualShift } from "../../../lib/timesheet";
+import { canEditClosedPeriod, createManualShift } from "../../../lib/timesheet";
 import { Capability, EmploymentStatus } from "../../../generated/prisma/client";
 
 /** Ручне додавання зміни (працівник не відмітився зовсім). Магазин зміни — той, де вона була, гейт EDIT_SHIFTS саме на нього. */
@@ -31,8 +31,10 @@ export async function POST(request: NextRequest) {
       startedAt: new Date(body?.startedAt),
       endedAt: new Date(body?.endedAt),
       reason: typeof body?.reason === "string" ? body.reason : "",
+      comment: typeof body?.comment === "string" ? body.comment : "",
     },
     actor.id,
+    await canEditClosedPeriod(session.id),
   );
   if (!result.ok) return NextResponse.json({ error: result.error }, { status: 400 });
   return NextResponse.json({ id: result.shiftId });
