@@ -190,7 +190,7 @@ const FUNNEL_STAGE_ORDER: EmploymentStatus[] = [
 /** entityType завжди "Employment", тож onboarding-переходи однієї людини не сплутати з чужими. */
 const AUDIT_STAGE_DEFS: { key: string; label: string; fromAction: string | null; toAction: string }[] = [
   { key: "toDocumentsPending", label: "Реєстрація → призначення куратора", fromAction: null, toAction: "onboarding.documentsPending" },
-  { key: "toTrainee", label: "Оформлення прийому (заява, наказ)", fromAction: "onboarding.documentsPending", toAction: "onboarding.traineeStarted" },
+  { key: "toTrainee", label: "Оформлення прийому (бухгалтерія)", fromAction: "onboarding.documentsPending", toAction: "onboarding.traineeStarted" },
   {
     key: "toReadyForAttestation",
     label: "Стажування під наглядом куратора",

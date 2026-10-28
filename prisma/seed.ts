@@ -790,11 +790,10 @@ const baseChecklistItems: ChecklistItemSeed[] = [
   // оператор 1С більше нічого вручну не вводить — крок автоматичний.
   { order: 5, title: "Генерація коду працівника", responsibleRole: null, actionType: ActionType.AUTO, isBlocking: true, slaHours: 0, module: null },
   { order: 6, title: "Прийом і сканування документів", responsibleRole: Role.ACCOUNTANT, actionType: ActionType.UPLOAD, isBlocking: true, slaHours: 72, module: null },
-  { order: 7, title: "Оформлення прийому (заява, наказ)", responsibleRole: Role.ACCOUNTANT, actionType: ActionType.MARK, isBlocking: true, slaHours: 72, module: null },
-  // order 8, не серед модульних (правки 20.09.2026, п.9): виконує бухгалтер
-  // одразу після оформлення прийому, поки людина ще в кабінеті — умовний
-  // (module: MVO), як і решта модульних, просто не в діапазоні 100+.
-  { order: 8, title: "Договір про матвідповідальність", responsibleRole: Role.ACCOUNTANT, actionType: ActionType.MARK, isBlocking: true, slaHours: 72, module: ChecklistModule.MVO },
+  // 2026-10-28: пункти «Оформлення прийому (заява, наказ)» (order 7) і «Договір про
+  // матвідповідальність» (order 8) прибрано за результатами практичного тесту — усе оформлення
+  // в бухгалтерії закривається кроком «Прийом і сканування документів». Номери order не
+  // зсуваємо: код прив'язаний до назв пунктів, а проміжок у нумерації нічого не ламає.
   { order: 9, title: "Вступний інструктаж з охорони праці", responsibleRole: Role.STORE_ADMIN, actionType: ActionType.MARK, isBlocking: true, slaHours: 24, module: null },
   { order: 10, title: "Інструктаж з пожежної безпеки", responsibleRole: Role.STORE_ADMIN, actionType: ActionType.MARK, isBlocking: true, slaHours: 24, module: null },
   { order: 11, title: "Видача бейджа, спецодягу, ключів", responsibleRole: Role.STORE_ADMIN, actionType: ActionType.MARK, isBlocking: false, slaHours: 72, module: null },

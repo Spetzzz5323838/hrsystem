@@ -504,7 +504,14 @@ export async function completeTask(
     }
   }
 
-  if (task.itemTemplate.title === "Оформлення прийому (заява, наказ)") {
+  // Початок стажування (TRAINEE) наступає, коли бухгалтерія завершила оформлення. З 2026-10-28
+  // окремий крок «Оформлення прийому» прибрано з чек-ліста — тоді тригером є «Прийом і сканування
+  // документів». У вже запущених процесах старої версії, де крок ще є, переходу чекаємо від нього.
+  const paperworkDone =
+    task.itemTemplate.title === "Оформлення прийому (заява, наказ)" ||
+    (task.itemTemplate.title === "Прийом і сканування документів" &&
+      !(await prisma.task.findFirst({ where: { instanceId: task.instanceId, itemTemplate: { title: "Оформлення прийому (заява, наказ)" } }, select: { id: true } })));
+  if (paperworkDone) {
     await prisma.employment.update({ where: { id: employment.id }, data: { status: EmploymentStatus.TRAINEE } });
     await logAudit({ actorId: completedByEmploymentId, action: "onboarding.traineeStarted", entityType: "Employment", entityId: employment.id });
 
