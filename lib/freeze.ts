@@ -1,6 +1,7 @@
 import { prisma } from "./prisma";
 import { EmploymentStatus } from "../generated/prisma/client";
 import { logAudit } from "./audit";
+import { recordEmploymentEvent } from "./events";
 
 export async function freezeEmployment(
   employmentId: number,
@@ -34,6 +35,7 @@ export async function freezeEmployment(
     entityId: employmentId,
     diff: { reasonCode: input.reasonCode },
   });
+  await recordEmploymentEvent("FREEZE", employmentId, "заморожено");
 
   return { ok: true };
 }
@@ -87,6 +89,7 @@ export async function unfreezeEmployment(employmentId: number, actorEmploymentId
     entityId: employmentId,
     diff: { frozenDays },
   });
+  await recordEmploymentEvent("FREEZE", employmentId, `повернувся із заморозки (${frozenDays} дн.)`);
 
   return { ok: true, extendedCompetencies: records.length, frozenDays };
 }

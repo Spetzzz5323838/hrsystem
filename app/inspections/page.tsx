@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 
 type OpenRow = { id: number; storeName: string; kind: "DAILY" | "WEEKLY"; status: string; plannedFor: string; postponedCount: number; canStart: boolean; conductedBy: string | null };
 type ViolationRow = { id: number; resultId: number; inspectionId: number; hasPhoto: boolean; storeName: string; where: string; text: string; comment: string; status: "OPEN" | "IN_PROGRESS" | "RESOLVED"; createdAt: string; takenBy: string | null };
-type DoneRow = { id: number; storeName: string; kind: "DAILY" | "WEEKLY"; completedAt: string; conductedBy: string | null; green: number; yellow: number; red: number };
+type DoneRow = { id: number; storeName: string; kind: "DAILY" | "WEEKLY"; completedAt: string; summaryNote: string | null; conductedBy: string | null; green: number; yellow: number; red: number };
 
 const fmt = (iso: string) => new Date(iso).toLocaleString("uk-UA", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
 const kindLabel = (k: "DAILY" | "WEEKLY") => (k === "DAILY" ? "Щоденний обхід" : "Щотижневий обхід");
@@ -168,6 +168,7 @@ export default function InspectionsPage() {
                 <p className="text-xs text-slate-500">
                   {kindLabel(d.kind)} · {fmt(d.completedAt)} · {d.conductedBy ?? "—"}
                 </p>
+                {d.summaryNote && <p className="mt-1 text-xs text-slate-700">Висновок: {d.summaryNote}</p>}
               </div>
             ))}
           </section>

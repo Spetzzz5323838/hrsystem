@@ -2,6 +2,7 @@
 
 import ExtraObjectsBlock from "./ExtraObjectsBlock";
 import TrainingTab from "./TrainingTab";
+import TestsTab from "./TestsTab";
 import TimesheetCorrectionsTab from "./TimesheetCorrectionsTab";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
@@ -394,6 +395,7 @@ const TABS = [
   ["termination", "Звільнення"],
   ["comp", "Компетенції"],
   ["training", "Навчання"],
+  ["tests", "Тести"],
   ["tscorr", "Правки табеля"],
   ["docs", "Документи"],
   ["rating", "Рейтинг"],
@@ -722,7 +724,7 @@ function ProfileFieldsDialog({
   );
 }
 
-type AttestationFormRow = { competencyId: number; code: string; name: string; isRequired: boolean };
+type AttestationFormRow = { competencyId: number; code: string; name: string; isRequired: boolean; testScore: number | null };
 type AttestationForm = { positionProfileId: number; rows: AttestationFormRow[] };
 
 const SCORE_LABELS: Record<number, string> = { 0: "Не здав", 1: "Треба попрацювати", 2: "Молодець" };
@@ -756,7 +758,8 @@ function AttestationDialog({
         if (!ok) throw new Error(body.error ?? "Не вдалося завантажити форму");
         setForm(body);
         const initial: Record<number, number> = {};
-        for (const row of body.rows as AttestationFormRow[]) initial[row.competencyId] = 0;
+        // Бал тесту з Telegram підставляється автоматично; атестатор лише доповнює практику й може змінити.
+        for (const row of body.rows as AttestationFormRow[]) initial[row.competencyId] = row.testScore ?? 0;
         setScores(initial);
       })
       .catch((e) => setLoadError(e.message));
@@ -786,7 +789,10 @@ function AttestationDialog({
 
   const ScoreRow = ({ row }: { row: AttestationFormRow }) => (
     <div className="flex items-center justify-between gap-3 py-1">
-      <span className="text-sm text-slate-700">{row.name}</span>
+      <span className="text-sm text-slate-700">
+        {row.name}
+        {row.testScore !== null && <span className="ml-2 rounded bg-sky-50 px-1.5 py-0.5 text-xs text-sky-700">тест: {row.testScore}</span>}
+      </span>
       <div className="flex gap-1">
         {[0, 1, 2].map((v) => (
           <button
@@ -833,7 +839,7 @@ function AttestationDialog({
         ) : (
           form && (
             <div className="mt-4 space-y-4">
-              <p className="text-xs text-slate-400">Бал 0/1/2 на кожну компетенцію — 1 і 2 зараховують її. Сам іспит/перевірка йде поза системою.</p>
+              <p className="text-xs text-slate-400">Бал 0/1/2 на кожну компетенцію — 1 і 2 зараховують її. Знання перевіряє тест у боті (його бал підставлено автоматично), практику оцінює атестатор.</p>
 
               <div>
                 <h4 className="mb-1 text-sm font-semibold text-slate-800">Обов&rsquo;язкові</h4>
@@ -2592,6 +2598,7 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
         )}
 
         {tab === "training" && <TrainingTab employmentId={employmentId} />}
+        {tab === "tests" && <TestsTab employmentId={employmentId} />}
         {tab === "tscorr" && <TimesheetCorrectionsTab employmentId={employmentId} />}
 
         {tab === "comp" && (

@@ -64,7 +64,7 @@ export async function getTrainingPlan(personId: number): Promise<TrainingPlan | 
   const [positionCompetencies, delta, progressRows] = await Promise.all([
     prisma.positionCompetency.findMany({
       where: { positionProfileId },
-      include: { competency: { include: { materials: { orderBy: { id: "asc" } } } } },
+      include: { competency: { include: { materials: { orderBy: { id: "asc" } }, test: true } } },
     }),
     getCompetencyDelta(personId, positionProfileId),
     prisma.materialProgress.findMany({ where: { personId } }),
@@ -73,7 +73,7 @@ export async function getTrainingPlan(personId: number): Promise<TrainingPlan | 
   const progressByMaterial = new Map(progressRows.map((p) => [p.materialId, p]));
 
   const competencies: TrainingCompetency[] = positionCompetencies
-    .filter((pc) => pc.competency.materials.length > 0)
+    .filter((pc) => pc.competency.materials.length > 0 || pc.competency.test?.isActive)
     .map((pc) => {
       const state = stateByCompetency.get(pc.competencyId) ?? "missing";
       const mandatory = pc.isRequired && state !== "valid";

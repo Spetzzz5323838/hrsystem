@@ -45,6 +45,7 @@ export default function InspectionRunPage({ params }: { params: Promise<{ id: st
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [editing, setEditing] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
+  const [summaryNote, setSummaryNote] = useState("");
 
   const load = useCallback(() => {
     fetch(`/api/inspections/${id}`)
@@ -124,7 +125,7 @@ export default function InspectionRunPage({ params }: { params: Promise<{ id: st
 
   const finish = async () => {
     setBusy(true);
-    const r = await fetch(`/api/inspections/${id}/complete`, { method: "POST" });
+    const r = await fetch(`/api/inspections/${id}/complete`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ summaryNote }) });
     const b = await r.json().catch(() => ({}));
     setBusy(false);
     if (!r.ok) setError(b.error ?? "Не вдалося завершити");
@@ -273,7 +274,17 @@ export default function InspectionRunPage({ params }: { params: Promise<{ id: st
 
       {data?.status === "IN_PROGRESS" && (
         <div className="fixed inset-x-0 bottom-0 border-t border-slate-200 bg-white p-3">
-          <div className="mx-auto max-w-xl">
+          <div className="mx-auto max-w-xl space-y-2">
+            {rated >= total && (
+              <textarea
+                value={summaryNote}
+                onChange={(e) => setSummaryNote(e.target.value)}
+                maxLength={1000}
+                rows={2}
+                placeholder="Загальний висновок за обхід (необов'язково)"
+                className="w-full rounded-md border border-slate-300 p-2 text-sm"
+              />
+            )}
             <button disabled={busy || rated < total} onClick={finish} className="w-full rounded-md bg-emerald-600 py-3 text-base font-semibold text-white disabled:bg-slate-300">
               {rated < total ? `Лишилось оцінити: ${total - rated}` : "Завершити обхід"}
             </button>

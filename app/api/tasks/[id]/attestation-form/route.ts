@@ -17,7 +17,7 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
   });
   if (!task) return NextResponse.json({ error: "Задачу не знайдено" }, { status: 404 });
 
-  const form = await getAttestationForm(task.instance.employment.staffUnit.positionProfileId);
+  const form = await getAttestationForm(task.instance.employment.staffUnit.positionProfileId, task.instance.employment.personId);
   if (!form) return NextResponse.json({ error: "Форма атестації не налаштована" }, { status: 404 });
 
   return NextResponse.json(form);

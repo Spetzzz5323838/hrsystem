@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ListChecks, Users, BookOpen, Network, ShieldCheck, CalendarDays, BarChart3, Megaphone, ScanBarcode, Clock, LayoutGrid, ClipboardCheck, ClipboardList } from "lucide-react";
+import { ListChecks, Users, BookOpen, Network, ShieldCheck, CalendarDays, BarChart3, Megaphone, ScanBarcode, Clock, LayoutGrid, ClipboardCheck, ClipboardList, Bell } from "lucide-react";
 
 const NAV = [
   { href: "/", label: "Мої задачі", icon: ListChecks },
@@ -19,6 +19,7 @@ const NAV = [
   { href: "/structure", label: "Структура", icon: Network },
   { href: "/catalog", label: "Довідники", icon: BookOpen },
   { href: "/analytics", label: "Аналітика", icon: BarChart3, cap: "VIEW_ANALYTICS" },
+  { href: "/notifications", label: "Сповіщення", icon: Bell, cap: "MANAGE_PERMISSIONS" },
   { href: "/permissions", label: "Права доступу", icon: ShieldCheck, cap: "MANAGE_PERMISSIONS" },
 ] as const;
 

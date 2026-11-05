@@ -5,7 +5,7 @@ import { findAncestorPath } from "./permissions";
 import { logAudit } from "./audit";
 import { EmploymentStatus, OrgNodeType, CompetencySource } from "../generated/prisma/client";
 
-export type AttestationFormRow = { competencyId: number; code: string; name: string; isRequired: boolean };
+export type AttestationFormRow = { competencyId: number; code: string; name: string; isRequired: boolean; /** Бал останнього чинного тесту цієї компетенції (0/1/2) — підставляється в табель автоматично. */ testScore: number | null };
 export type AttestationForm = { positionProfileId: number; rows: AttestationFormRow[] };
 
 /**
@@ -15,7 +15,7 @@ export type AttestationForm = { positionProfileId: number; rows: AttestationForm
  * жодної компетенції — форми немає (null), і на екрані лишається проста
  * кнопка "Пройдено" без табеля (стара поведінка).
  */
-export async function getAttestationForm(positionProfileId: number): Promise<AttestationForm | null> {
+export async function getAttestationForm(positionProfileId: number, personId?: number): Promise<AttestationForm | null> {
   const rows = await prisma.positionCompetency.findMany({
     where: { positionProfileId },
     include: { competency: true },
@@ -23,9 +23,23 @@ export async function getAttestationForm(positionProfileId: number): Promise<Att
   });
   if (!rows.length) return null;
 
+  // Результати тестів у Telegram (знання) підставляються в табель; практику оцінює атестатор.
+  const testScores = new Map<number, number>();
+  if (personId) {
+    const now = new Date();
+    const records = await prisma.competencyRecord.findMany({
+      where: { personId, source: CompetencySource.TEST, competencyId: { in: rows.map((r) => r.competencyId) }, OR: [{ validUntil: null }, { validUntil: { gt: now } }] },
+      orderBy: { passedAt: "desc" },
+    });
+    for (const rec of records) {
+      const best = testScores.get(rec.competencyId);
+      if (rec.score !== null && (best === undefined || rec.score > best)) testScores.set(rec.competencyId, rec.score);
+    }
+  }
+
   return {
     positionProfileId,
-    rows: rows.map((r) => ({ competencyId: r.competencyId, code: r.competency.code, name: r.competency.name, isRequired: r.isRequired })),
+    rows: rows.map((r) => ({ competencyId: r.competencyId, code: r.competency.code, name: r.competency.name, isRequired: r.isRequired, testScore: testScores.get(r.competencyId) ?? null })),
   };
 }
 
