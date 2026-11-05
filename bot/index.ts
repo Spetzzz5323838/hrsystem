@@ -2,6 +2,7 @@ import { Bot, Keyboard, type Context } from "grammy";
 import { prisma } from "../lib/prisma";
 import { resolveAssignee, confirmReadyForAttestation, completeTask, getMyPendingEmployeeMarkTasks, tryCompleteMaterialsAck } from "../lib/onboarding";
 import { getTrainingPlan, getMaterialInPlan, markReceived, markViewed, notifyTrainingChanges, type TrainingPlan, type MaterialStatus } from "../lib/training";
+import { startAttempt, getCurrentQuestion, answerQuestion, getTestAvailability } from "../lib/tests";
 import { registerTelegramMessageWorker } from "../lib/notifications";
 import { sendNotification, sendNotificationNow } from "../lib/notificationTemplates";
 import { getBoss } from "../lib/queue";
@@ -195,6 +196,12 @@ async function showTasks(ctx: Context) {
   }
 
   for (const t of tasks) {
+    if (t.testCompetencyId) {
+      await ctx.reply(`Потрібна ваша дія: «${t.title}» — пройдіть тест у боті, результат запишеться автоматично.`, {
+        reply_markup: { inline_keyboard: [[{ text: "📝 Пройти тест", callback_data: `tt:start:${t.testCompetencyId}` }]] },
+      });
+      continue;
+    }
     if (t.trainingProgress) {
       // Крок ознайомлення закривається сам за прогресом у «Навчанні» — кнопки «Виконано» немає.
       await ctx.reply(
@@ -323,7 +330,7 @@ function trainingMenuView(plan: TrainingPlan): { text: string; markup: InlineKey
   };
 }
 
-function trainingCompetencyView(plan: TrainingPlan, competencyId: number): { text: string; markup: InlineKeyboard } | null {
+function trainingCompetencyView(plan: TrainingPlan, competencyId: number, testReady = false): { text: string; markup: InlineKeyboard } | null {
   const c = plan.competencies.find((x) => x.competencyId === competencyId);
   if (!c) return null;
   const lines = [`📖 ${c.name}`, "", "⬜ не отримано · 📥 отримано · ✅ переглянуто · 🔄 оновлено, перегляньте знову", ""];
@@ -336,6 +343,7 @@ function trainingCompetencyView(plan: TrainingPlan, competencyId: number): { tex
     if (m.status === "received" || m.status === "updated") row.push({ text: `✅ Переглянув ${i + 1}`, callback_data: `tr:v:${m.id}` });
     rows.push(row);
   });
+  if (testReady) rows.push([{ text: "📝 Пройти тест", callback_data: `tt:start:${competencyId}` }]);
   rows.push([{ text: "⬅ До плану", callback_data: "tr:menu" }]);
   return { text: lines.join("\n"), markup: { inline_keyboard: rows } };
 }
@@ -390,7 +398,7 @@ bot.callbackQuery(/^tr:c:(\d+)$/, async (ctx) => {
   if (!person) return;
   await ctx.answerCallbackQuery();
   const plan = await getTrainingPlan(person.id);
-  const view = plan && trainingCompetencyView(plan, Number(ctx.match[1]));
+  const view = plan && (await competencyViewWithTest(plan, Number(ctx.match[1])));
   if (view) await showTrainingScreen(ctx, view, true);
 });
 
@@ -410,7 +418,7 @@ bot.callbackQuery(/^tr:g:(\d+)$/, async (ctx) => {
   await queueMaterialFileDelivery(person.id, found.material.id);
   await ctx.answerCallbackQuery({ text: "Надсилаю матеріал…" });
   const plan = await getTrainingPlan(person.id);
-  const view = plan && trainingCompetencyView(plan, found.competency.competencyId);
+  const view = plan && (await competencyViewWithTest(plan, found.competency.competencyId));
   if (view) await showTrainingScreen(ctx, view, true);
 });
 
@@ -427,8 +435,74 @@ bot.callbackQuery(/^tr:v:(\d+)$/, async (ctx) => {
   await tryCompleteMaterialsAck(person.id);
   const found = await getMaterialInPlan(person.id, materialId);
   const plan = await getTrainingPlan(person.id);
-  const view = plan && found && trainingCompetencyView(plan, found.competency.competencyId);
+  const view = plan && found && (await competencyViewWithTest(plan, found.competency.competencyId));
   if (view) await showTrainingScreen(ctx, view, true);
+});
+
+async function competencyViewWithTest(plan: TrainingPlan, competencyId: number) {
+  const availability = await getTestAvailability(competencyId);
+  return trainingCompetencyView(plan, competencyId, availability?.ready ?? false);
+}
+
+// ── Тести компетенцій (2026-11-05): одне питання за раз, одна правильна відповідь,
+// правильні відповіді не показуються — лише кількість. Результат пишеться автоматично.
+const OPTION_LETTERS = ["А", "Б", "В", "Г", "Д", "Е"];
+
+function testQuestionView(attemptId: number, competencyName: string, q: { position: number; total: number; text: string; options: string[] }) {
+  const lines = [`📝 Тест «${competencyName}» — питання ${q.position + 1} з ${q.total}`, "", q.text, ""];
+  q.options.forEach((o, i) => lines.push(`${OPTION_LETTERS[i]}) ${o}`));
+  return {
+    text: lines.join("\n"),
+    markup: { inline_keyboard: [q.options.map((_, i) => ({ text: OPTION_LETTERS[i], callback_data: `tt:a:${attemptId}:${q.position}:${i}` }))] } as InlineKeyboard,
+  };
+}
+
+const fmtClock = (d: Date) => d.toLocaleTimeString("uk-UA", { hour: "2-digit", minute: "2-digit" });
+
+bot.callbackQuery(/^tt:start:(\d+)$/, async (ctx) => {
+  const person = await trainingPerson(ctx);
+  if (!person) return;
+  const competencyId = Number(ctx.match[1]);
+  const started = await startAttempt(person.id, competencyId);
+  if (!started.ok) {
+    await ctx.answerCallbackQuery({ text: started.error, show_alert: true });
+    return;
+  }
+  await ctx.answerCallbackQuery({ text: started.resumed ? "Продовжуємо тест" : "Починаємо тест" });
+  const question = await getCurrentQuestion(started.attemptId, person.id);
+  const availability = await getTestAvailability(competencyId);
+  if (!question || !availability) return;
+  const view = testQuestionView(started.attemptId, availability.competencyName, question);
+  await ctx.reply(view.text, { reply_markup: view.markup });
+});
+
+bot.callbackQuery(/^tt:a:(\d+):(\d+):(\d+)$/, async (ctx) => {
+  const person = await trainingPerson(ctx);
+  if (!person) return;
+  const attemptId = Number(ctx.match[1]);
+  const result = await answerQuestion(attemptId, person.id, Number(ctx.match[2]), Number(ctx.match[3]));
+  if (!result.ok) {
+    await ctx.answerCallbackQuery({ text: result.error, show_alert: true });
+    return;
+  }
+  await ctx.answerCallbackQuery();
+  if (!result.finished) {
+    const attempt = await prisma.testAttempt.findUnique({ where: { id: attemptId }, include: { competency: true } });
+    const question = await getCurrentQuestion(attemptId, person.id);
+    if (attempt && question) {
+      const view = testQuestionView(attemptId, attempt.competency.name, question);
+      await showTrainingScreen(ctx, view, true);
+    }
+    return;
+  }
+  const r = result.result;
+  const lines = [`📝 Результат тесту «${result.competencyName}»`, "", `Правильних відповідей: ${r.correct} з ${r.total} (${r.percent}%)`, `Неправильних: ${r.total - r.correct}`, ""];
+  if (r.passed) {
+    lines.push(`✅ Зараховано. Оцінка: ${r.score} з 2.`, "Якщо хочете підвищити оцінку, тест можна пройти повторно після паузи.");
+  } else {
+    lines.push("❌ Не зараховано.", `Наступну спробу можна почати о ${fmtClock(r.nextAllowedAt)}. Тим часом повторіть матеріали в розділі «Навчання».`);
+  }
+  await showTrainingScreen(ctx, { text: lines.join("\n"), markup: { inline_keyboard: [[{ text: "📚 До навчання", callback_data: "tr:menu" }]] } }, true);
 });
 
 // ── Самообслуговування паролем кабінету (правки 20.09.2026, п.1) — поруч

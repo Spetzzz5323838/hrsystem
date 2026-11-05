@@ -59,13 +59,41 @@ const OPEN_TRAINING_BUTTON = { inline_keyboard: [[{ text: "📚 Відкрити
 async function notifyEmployeeMarkTask(task: {
   id: number;
   assigneeId: number | null;
-  itemTemplate: { responsibleRole: Role | null; actionType: ActionType; title: string };
+  itemTemplate: { responsibleRole: Role | null; actionType: ActionType; title: string; competencyId?: number | null };
 }): Promise<void> {
-  if (task.itemTemplate.responsibleRole !== Role.EMPLOYEE || task.itemTemplate.actionType !== ActionType.MARK) return;
+  if (task.itemTemplate.responsibleRole !== Role.EMPLOYEE) return;
+  const isTest = task.itemTemplate.actionType === ActionType.TEST && !!task.itemTemplate.competencyId;
+  if (!isTest && task.itemTemplate.actionType !== ActionType.MARK) return;
   if (!task.assigneeId) return;
 
   const assignee = await prisma.employment.findUnique({ where: { id: task.assigneeId }, include: { person: true, staffUnit: true } });
   if (!assignee) return;
+
+  if (isTest) {
+    // Пункт «Тест …»: працівник проходить тест у боті, пункт закривається автоматично (lib/tests.ts).
+    const competencyId = task.itemTemplate.competencyId!;
+    const now = new Date();
+    const validRecord = await prisma.competencyRecord.findFirst({
+      where: { personId: assignee.personId, competencyId, OR: [{ validUntil: null }, { validUntil: { gt: now } }] },
+      orderBy: [{ score: "desc" }, { passedAt: "desc" }],
+    });
+    if (validRecord) {
+      // Компетенція вже складена й чинна (повторний найм, раніше пройдений тест) — пункт не потребує дій.
+      await completeTask(task.id, assignee.id, { score: validRecord.score ?? 1 });
+      return;
+    }
+    const competency = await prisma.competency.findUnique({
+      where: { id: competencyId },
+      include: { test: true, _count: { select: { testQuestions: { where: { isActive: true } } } } },
+    });
+    if (!competency) return;
+    if (!competency.test?.isActive || competency._count.testQuestions === 0) {
+      await sendNotification(assignee.personId, "test.notReady", { name: competency.name });
+      return;
+    }
+    await sendNotification(assignee.personId, "test.stepAvailable", { name: competency.name }, { inline_keyboard: [[{ text: "📝 Пройти тест", callback_data: `tt:start:${competencyId}` }]] });
+    return;
+  }
 
   if (task.itemTemplate.title === MATERIALS_ACK_TASK_TITLE) {
     // Крок закривається САМ за прогресом у розділі «Навчання» (бот): без загальної кнопки.
@@ -255,7 +283,7 @@ export async function startOnboarding(employmentId: number): Promise<{ instanceI
  * показує ті самі MARK-пункти, призначені особисто працівнику, без
  * очікування на нове сповіщення.
  */
-export async function getMyPendingEmployeeMarkTasks(personId: number): Promise<{ taskId: number; title: string; trainingProgress: { viewed: number; total: number } | null }[]> {
+export async function getMyPendingEmployeeMarkTasks(personId: number): Promise<{ taskId: number; title: string; trainingProgress: { viewed: number; total: number } | null; testCompetencyId: number | null }[]> {
   const employments = await prisma.employment.findMany({
     where: { personId, status: { not: EmploymentStatus.TERMINATED } },
     select: { id: true },
@@ -267,13 +295,13 @@ export async function getMyPendingEmployeeMarkTasks(personId: number): Promise<{
     where: {
       assigneeId: { in: employmentIds },
       status: TaskStatus.PENDING,
-      itemTemplate: { responsibleRole: Role.EMPLOYEE, actionType: ActionType.MARK },
+      itemTemplate: { responsibleRole: Role.EMPLOYEE, actionType: { in: [ActionType.MARK, ActionType.TEST] } },
     },
     include: { itemTemplate: true },
   });
 
   const viewsByInstance = new Map<number, TaskView[]>();
-  const result: { taskId: number; title: string; trainingProgress: { viewed: number; total: number } | null }[] = [];
+  const result: { taskId: number; title: string; trainingProgress: { viewed: number; total: number } | null; testCompetencyId: number | null }[] = [];
   for (const t of tasks) {
     let views = viewsByInstance.get(t.instanceId);
     if (!views) {
@@ -289,7 +317,8 @@ export async function getMyPendingEmployeeMarkTasks(personId: number): Promise<{
       trainingProgress = { viewed: plan?.requiredViewed ?? 0, total: plan?.requiredTotal ?? 0 };
     }
 
-    result.push({ taskId: t.id, title: t.itemTemplate.title, trainingProgress });
+    const testCompetencyId = t.itemTemplate.actionType === ActionType.TEST ? t.itemTemplate.competencyId : null;
+    result.push({ taskId: t.id, title: t.itemTemplate.title, trainingProgress, testCompetencyId });
   }
   return result;
 }

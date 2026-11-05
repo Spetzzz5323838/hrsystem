@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { HelpCircle } from "lucide-react";
+import Link from "next/link";
 import AppShell from "../components/AppShell";
 
 /**
@@ -1148,6 +1149,9 @@ export default function CatalogPage() {
                           {canEdit && (
                             <td className="px-4 py-2 text-right">
                               <div className="flex justify-end gap-2">
+                                <Link href={`/catalog/tests?competencyId=${c.id}`} className="text-xs text-slate-600 hover:text-slate-900">
+                                  тест
+                                </Link>
                                 <button onClick={() => startEditCompetency(c)} className="text-xs text-slate-600 hover:text-slate-900">
                                   редагувати
                                 </button>

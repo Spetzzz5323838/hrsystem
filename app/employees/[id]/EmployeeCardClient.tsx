@@ -2,6 +2,7 @@
 
 import ExtraObjectsBlock from "./ExtraObjectsBlock";
 import TrainingTab from "./TrainingTab";
+import TestsTab from "./TestsTab";
 import TimesheetCorrectionsTab from "./TimesheetCorrectionsTab";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
@@ -394,6 +395,7 @@ const TABS = [
   ["termination", "Звільнення"],
   ["comp", "Компетенції"],
   ["training", "Навчання"],
+  ["tests", "Тести"],
   ["tscorr", "Правки табеля"],
   ["docs", "Документи"],
   ["rating", "Рейтинг"],
@@ -2592,6 +2594,7 @@ export default function EmployeeCardClient({ employmentId }: { employmentId: str
         )}
 
         {tab === "training" && <TrainingTab employmentId={employmentId} />}
+        {tab === "tests" && <TestsTab employmentId={employmentId} />}
         {tab === "tscorr" && <TimesheetCorrectionsTab employmentId={employmentId} />}
 
         {tab === "comp" && (
