@@ -2,6 +2,7 @@ import { prisma } from "./prisma";
 import { getCompetencyDelta } from "./competencies";
 import { resolveAssignee, completeTask as completeGenericTask } from "./onboarding";
 import { logAudit } from "./audit";
+import { recordEmploymentEvent } from "./events";
 import { EmploymentStatus, ProcessState, ProcessType, TaskStatus, OrgNodeType, Role } from "../generated/prisma/client";
 
 /** Погоджувач переведення = керівник найближчого спільного вузла рівня
@@ -126,6 +127,7 @@ export async function startTransfer(
     entityId: employmentId,
     diff: { fromStaffUnitId: employment.staffUnitId, toStaffUnitId: targetStaffUnitId },
   });
+  await recordEmploymentEvent("TRANSFER", employmentId, "розпочато переведення");
 
   return { ok: true, instanceId: instance.id };
 }
@@ -187,6 +189,7 @@ export async function completeTransferTask(
       entityType: "Employment",
       entityId: task.instance.employmentId,
     });
+    await recordEmploymentEvent("TRANSFER", task.instance.employmentId, "переведення завершено (нова посада/об'єкт)");
   }
 
   return { ok: true };

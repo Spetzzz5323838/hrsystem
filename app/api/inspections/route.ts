@@ -48,6 +48,7 @@ export async function GET() {
       storeName: i.orgNode.name,
       kind: i.kind,
       completedAt: i.completedAt,
+      summaryNote: i.summaryNote,
       conductedBy: i.conductedBy?.person.fullName ?? null,
       green: i.results.filter((r) => r.rating === "GREEN").length,
       yellow: i.results.filter((r) => r.rating === "YELLOW").length,

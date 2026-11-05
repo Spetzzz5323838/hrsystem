@@ -4,6 +4,7 @@ import path from "node:path";
 import { prisma } from "./prisma";
 import { resolveAssignee, completeTask as completeGenericTask } from "./onboarding";
 import { logAudit } from "./audit";
+import { recordEmploymentEvent } from "./events";
 import { renderClearanceSheetPdf } from "./pdf";
 import { createVacancy } from "./vacancies";
 import { EmploymentStatus, ProcessState, ProcessType, TaskStatus, VacancyReason } from "../generated/prisma/client";
@@ -129,6 +130,7 @@ export async function startTermination(
     entityId: employmentId,
     diff: { reasonCode: input.reasonCode, lastWorkingDay: input.lastWorkingDay },
   });
+  await recordEmploymentEvent("TERMINATION_STARTED", employmentId, `розпочато звільнення, останній робочий день ${input.lastWorkingDay.toLocaleDateString("uk-UA")}`);
 
   // Вакансія відкривається одразу при ІНІЦІАЦІЇ звільнення, не при
   // завершенні (з розмови 2026-09-23) — адміністратор знає заздалегідь і
@@ -182,6 +184,7 @@ export async function completeTerminationTask(
       entityType: "Employment",
       entityId: task.instance.employmentId,
     });
+    await recordEmploymentEvent("TERMINATION_DONE", task.instance.employmentId, "звільнення завершено");
   }
 
   return { ok: true };

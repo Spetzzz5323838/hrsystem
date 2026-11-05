@@ -226,14 +226,15 @@ enum ReviewCriterion {
 /// path — матеріалізований шлях виду "1.3.14", перевірка доступу зводиться
 /// до target.path.startsWith(scope.path).
 model OrgNode {
-  id       Int         @id @default(autoincrement())
-  type     OrgNodeType
-  name     String
-  code     String?     @unique
-  parentId Int?
-  parent   OrgNode?    @relation("OrgNodeTree", fields: [parentId], references: [id])
-  children OrgNode[]   @relation("OrgNodeTree")
-  path     String
+  eventLogs EventLog[]
+  id        Int         @id @default(autoincrement())
+  type      OrgNodeType
+  name      String
+  code      String?     @unique
+  parentId  Int?
+  parent    OrgNode?    @relation("OrgNodeTree", fields: [parentId], references: [id])
+  children  OrgNode[]   @relation("OrgNodeTree")
+  path      String
 
   headEmploymentId Int?
   headEmployment   Employment? @relation(fields: [headEmploymentId], references: [id])
@@ -292,21 +293,22 @@ model PendingHire {
 /// Телефон — природний ключ для входу й пошуку, але не первинний ключ:
 /// номери змінюються й повторно продаються операторами (docs v1.2 §5).
 model Person {
-  id                Int       @id @default(autoincrement())
-  fullName          String
-  birthDate         DateTime?
-  telegramId        BigInt?   @unique
-  phone             String    @unique
-  email             String?
-  phoneVerifiedAt   DateTime?
-  passwordHash      String?
-  externalRef       String?
+  eventSubscriptions EventSubscription[]
+  id                 Int                 @id @default(autoincrement())
+  fullName           String
+  birthDate          DateTime?
+  telegramId         BigInt?             @unique
+  phone              String              @unique
+  email              String?
+  phoneVerifiedAt    DateTime?
+  passwordHash       String?
+  externalRef        String?
   /// Код працівника для бейджа й обліку робочого часу (2026-10-18) — не
   /// секрет, випадкові цифри (не послідовні), генерує lib/badgeCode.ts.
   /// Перевидача (загублений бейдж) робить старий код недійсним.
-  badgeCode         String?   @unique
-  badgeCodeIssuedAt DateTime?
-  createdAt         DateTime  @default(now())
+  badgeCode          String?             @unique
+  badgeCodeIssuedAt  DateTime?
+  createdAt          DateTime            @default(now())
 
   employments       Employment[]
   competencyRecords CompetencyRecord[]
@@ -1493,6 +1495,8 @@ model Inspection {
   conductedBy         Employment?        @relation("InspectionConductedBy", fields: [conductedById], references: [id])
   startedAt           DateTime?
   completedAt         DateTime?
+  /// Загальний висновок за обхід (необов'язковий) — іде підписникам у зведенні.
+  summaryNote         String?
   createdAt           DateTime           @default(now())
   results             InspectionResult[]
   violations          Violation[]
@@ -1728,4 +1732,40 @@ model TestAnswer {
   answeredAt  DateTime     @default(now())
 
   @@unique([attemptId, position])
+}
+
+/// Центр сповіщень (2026-11-05): правило за замовчуванням для кожної події.
+/// Каталог подій — у коді (lib/events.ts); тут лише налаштування, які редагує адміністратор.
+model EventRule {
+  eventCode          String  @id
+  enabled            Boolean @default(true)
+  /// Мінімальний рівень посади (PositionProfile.level), кому подія приходить за замовчуванням.
+  minLevel           Int     @default(40)
+  /// Чи надсилати за замовчуванням бухгалтерам (ролі ACCOUNTANT).
+  includeAccountants Boolean @default(false)
+}
+
+/// Особиста підписка: перевизначає правило за замовчуванням для цієї людини.
+model EventSubscription {
+  id        Int     @id @default(autoincrement())
+  personId  Int
+  person    Person  @relation(fields: [personId], references: [id])
+  eventCode String
+  enabled   Boolean
+
+  @@unique([personId, eventCode])
+}
+
+/// Журнал подій: що сталося й де. Розсилається підписникам щоденним зведенням.
+model EventLog {
+  id           Int       @id @default(autoincrement())
+  eventCode    String
+  orgNodeId    Int
+  orgNode      OrgNode   @relation(fields: [orgNodeId], references: [id])
+  text         String
+  createdAt    DateTime  @default(now())
+  dispatchedAt DateTime?
+
+  @@index([dispatchedAt])
+  @@index([eventCode, createdAt])
 }

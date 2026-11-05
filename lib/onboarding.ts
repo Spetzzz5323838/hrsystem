@@ -7,6 +7,7 @@ import { isCuratorEligibleFor } from "./curator";
 import { hashPassword, generateCabinetPassword } from "./auth";
 import { checkProfileClosedBadge, checkBeyondProfileBadge, checkFastStartBadge, checkMentorBadge } from "./rating";
 import { getTrainingPlan, findActiveEmployment } from "./training";
+import { recordEmploymentEvent } from "./events";
 import { CREDENTIALS_STEP_TITLES, issueOnboardingCredentials } from "./credentials";
 import {
   Role,
@@ -543,6 +544,7 @@ export async function completeTask(
   if (paperworkDone) {
     await prisma.employment.update({ where: { id: employment.id }, data: { status: EmploymentStatus.TRAINEE } });
     await logAudit({ actorId: completedByEmploymentId, action: "onboarding.traineeStarted", entityType: "Employment", entityId: employment.id });
+    await recordEmploymentEvent("HIRE_TRAINEE", employment.id, "прийнято на стажування");
 
     const storeAdminId = await resolveAssignee(Role.STORE_ADMIN, employment.staffUnit.orgNode.path);
     if (storeAdminId) {
@@ -607,6 +609,7 @@ export async function completeTask(
         entityType: "Employment",
         entityId: employment.id,
       });
+      await recordEmploymentEvent("HIRE_ACTIVE", employment.id, "пройшов(ла) атестацію, тепер повноцінний працівник");
       await checkFastStartBadge(employment.personId);
       if (employment.curatorId) {
         await checkMentorBadge(employment.curatorId);

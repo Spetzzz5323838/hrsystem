@@ -2,6 +2,7 @@ import { Bot, Keyboard, type Context } from "grammy";
 import { prisma } from "../lib/prisma";
 import { resolveAssignee, confirmReadyForAttestation, completeTask, getMyPendingEmployeeMarkTasks, tryCompleteMaterialsAck } from "../lib/onboarding";
 import { getTrainingPlan, getMaterialInPlan, markReceived, markViewed, notifyTrainingChanges, type TrainingPlan, type MaterialStatus } from "../lib/training";
+import { recordEvent, dispatchDigest, getMySubscriptions, toggleSubscription } from "../lib/events";
 import { startAttempt, getCurrentQuestion, answerQuestion, getTestAvailability } from "../lib/tests";
 import { registerTelegramMessageWorker } from "../lib/notifications";
 import { sendNotification, sendNotificationNow } from "../lib/notificationTemplates";
@@ -290,7 +291,8 @@ const MENU_TASKS = "📋 Мої задачі";
 const MENU_NEWS = "📢 Новини";
 const MENU_VACATION = "🏖 Відпустка";
 const MENU_TRAINING = "📚 Навчання";
-const mainMenu = new Keyboard().text(MENU_WORKTIME).text(MENU_TASKS).row().text(MENU_TRAINING).text(MENU_NEWS).row().text(MENU_VACATION).resized().persistent();
+const MENU_SUBSCRIPTIONS = "🔔 Підписки";
+const mainMenu = new Keyboard().text(MENU_WORKTIME).text(MENU_TASKS).row().text(MENU_TRAINING).text(MENU_NEWS).row().text(MENU_VACATION).text(MENU_SUBSCRIPTIONS).resized().persistent();
 
 bot.command("menu", async (ctx) => {
   if (!ctx.from) return;
@@ -307,6 +309,50 @@ bot.hears(MENU_WORKTIME, showWorkTime);
 bot.hears(MENU_TASKS, showTasks);
 bot.hears(MENU_NEWS, showNews);
 bot.hears(MENU_VACATION, startVacation);
+
+// ── Підписки на події (центр сповіщень, 2026-11-05): керівники й бухгалтери самі вмикають/вимикають
+// кожен тип події; вони приходять одним щоденним зведенням.
+async function subscriptionsView(personId: number): Promise<{ text: string; markup: InlineKeyboard } | null> {
+  const rows = await getMySubscriptions(personId);
+  if (!rows) return null;
+  const lines = ["🔔 Підписки на події", "", "Події приходять одним зведенням раз на добу (о 18:00). Натисніть на подію, щоб увімкнути або вимкнути її.", ""];
+  for (const r of rows) lines.push(`${r.enabled ? "✅" : "▫️"} ${r.title}`);
+  return {
+    text: lines.join("\n"),
+    markup: { inline_keyboard: rows.map((r) => [{ text: `${r.enabled ? "✅" : "▫️"} ${r.title}`, callback_data: `sb:t:${r.eventCode}` }]) },
+  };
+}
+
+async function startSubscriptions(ctx: Context) {
+  if (!ctx.from) return;
+  const person = await prisma.person.findUnique({ where: { telegramId: BigInt(ctx.from.id) } });
+  if (!person) {
+    await ctx.reply("Спершу прив'яжіть Telegram до вашого акаунта — напишіть /link.");
+    return;
+  }
+  const view = await subscriptionsView(person.id);
+  if (!view) {
+    await ctx.reply("Підписки на події доступні керівникам, адміністраторам і бухгалтерам.");
+    return;
+  }
+  await ctx.reply(view.text, { reply_markup: view.markup });
+}
+bot.command("subscriptions", startSubscriptions);
+bot.hears(MENU_SUBSCRIPTIONS, startSubscriptions);
+
+bot.callbackQuery(/^sb:t:([A-Z_]+)$/, async (ctx) => {
+  if (!ctx.from) return;
+  const person = await prisma.person.findUnique({ where: { telegramId: BigInt(ctx.from.id) } });
+  if (!person) return;
+  const result = await toggleSubscription(person.id, ctx.match[1]);
+  if (result === null) {
+    await ctx.answerCallbackQuery({ text: "Ця підписка вам недоступна", show_alert: true });
+    return;
+  }
+  await ctx.answerCallbackQuery({ text: result ? "Увімкнено" : "Вимкнено" });
+  const view = await subscriptionsView(person.id);
+  if (view) await ctx.editMessageText(view.text, { reply_markup: view.markup });
+});
 
 // ── Навчання (2026-10-28): працівник бачить свій план, сам запитує матеріали й
 // відмічає, що переглянув; крок онбордингу "Ознайомлення..." закривається автоматично.
@@ -728,6 +774,7 @@ bot.on("message:contact", async (ctx) => {
         orgNodeId: state.orgNodeId,
       },
     });
+    await recordEvent("HIRE_REGISTERED", state.orgNodeId, `${state.fullName} зареєструвався(лась) за QR-кодом (${state.orgNodeName}), чекає на опрацювання`);
 
     await ctx.reply(
       `Дякую, ${state.fullName}! Вашу заявку зареєстровано на об'єкт «${state.orgNodeName}». ` +
@@ -900,6 +947,7 @@ const TRAINING_CHANGES_QUEUE = "training-changes-notify";
 const AREA_STAFFING_QUEUE = "area-staffing-check";
 const TERMINAL_SILENCE_QUEUE = "terminal-silence-check";
 const SHIFT_AUTOCLOSE_QUEUE = "shift-autoclose-check";
+const EVENT_DIGEST_QUEUE = "event-digest";
 
 /**
  * Черга й планувальник живуть у процесі бота (не окремим третім
@@ -952,6 +1000,13 @@ async function setupQueue() {
   // Щогодини, не раз на ніч: правило те саме (зміна >16 год), але комп'ютери
   // на касах вимикають на ніч, і адмін дізнається про "забуту" зміну швидше.
   await boss.schedule(SHIFT_AUTOCLOSE_QUEUE, "10 * * * *");
+
+  await boss.createQueue(EVENT_DIGEST_QUEUE);
+  await boss.work(EVENT_DIGEST_QUEUE, async () => {
+    const { events, recipients } = await dispatchDigest();
+    if (events) console.log(`Зведення подій: ${events} подій, отримувачів ${recipients}.`);
+  });
+  await boss.schedule(EVENT_DIGEST_QUEUE, "0 18 * * *", null, { tz: "Europe/Kyiv" }); // щодня о 18:00 за Києвом
 
   await boss.createQueue(TERMINAL_SILENCE_QUEUE);
   await boss.work(TERMINAL_SILENCE_QUEUE, async () => {

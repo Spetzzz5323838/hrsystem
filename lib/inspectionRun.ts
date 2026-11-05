@@ -5,6 +5,7 @@ import { logAudit } from "./audit";
 import { getSessionPerson } from "./auth";
 import { createViolationsForInspection } from "./violations";
 import { can } from "./permissions";
+import { recordEvent } from "./events";
 import { Capability, EmploymentStatus, InspectionKind, InspectionRating, InspectionStatus, RegulationTarget } from "../generated/prisma/client";
 
 const PHOTO_ROOT = path.join(process.cwd(), "storage", "inspections");
@@ -206,16 +207,23 @@ export async function readPhoto(resultId: number): Promise<{ buffer: Buffer; mim
 }
 
 /** Завершення: усі вимоги мають бути оцінені. Зв'язок із порушеннями й рейтингом — етап 8. */
-export async function completeInspection(inspectionId: number, actorEmploymentId: number): Promise<{ ok: true; violations: number } | { ok: false; error: string }> {
-  const inspection = await prisma.inspection.findUnique({ where: { id: inspectionId } });
+export async function completeInspection(inspectionId: number, actorEmploymentId: number, summaryNote?: string | null): Promise<{ ok: true; violations: number } | { ok: false; error: string }> {
+  const inspection = await prisma.inspection.findUnique({ where: { id: inspectionId }, include: { orgNode: true } });
   if (!inspection || inspection.status !== InspectionStatus.IN_PROGRESS) return { ok: false, error: "Обхід не розпочато або вже завершено" };
 
   const built = await buildCheckpoints(inspectionId);
   const unrated = built?.checkpoints.filter((c) => !c.result).length ?? 0;
   if (unrated > 0) return { ok: false, error: `Лишилось неоцінених вимог: ${unrated}` };
 
-  await prisma.inspection.update({ where: { id: inspectionId }, data: { status: InspectionStatus.COMPLETED, completedAt: new Date() } });
+  await prisma.inspection.update({ where: { id: inspectionId }, data: { status: InspectionStatus.COMPLETED, completedAt: new Date(), summaryNote: summaryNote?.trim() ? summaryNote.trim().slice(0, 1000) : null } });
   await logAudit({ actorId: actorEmploymentId, action: "inspection.completed", entityType: "Inspection", entityId: inspectionId });
+
+  // Підсумок обходу іде підписникам зведенням (центр сповіщень). Коментарі до 🟢 не потрібні — лише кількість.
+  const results = await prisma.inspectionResult.findMany({ where: { inspectionId }, select: { rating: true } });
+  const count = (r: InspectionRating) => results.filter((x) => x.rating === r).length;
+  const kind = inspection.kind === InspectionKind.WEEKLY ? "тижневий" : "щоденний";
+  const note = summaryNote?.trim() ? ` Висновок: ${summaryNote.trim().slice(0, 300)}` : "";
+  await recordEvent("INSPECTION_COMPLETED", inspection.orgNodeId, `${inspection.orgNode.name}, ${kind} обхід: 🟢${count(InspectionRating.GREEN)} 🟡${count(InspectionRating.YELLOW)} 🔴${count(InspectionRating.RED)}.${note}`);
   const violations = await createViolationsForInspection(inspectionId, actorEmploymentId);
   return { ok: true, violations };
 }
